@@ -433,9 +433,16 @@ fn draw_idle(ui: &mut Ui, st: &mut AppState, body: Rect) {
     match st.settings.idle_style {
         IdleStyle::Clock | IdleStyle::Status => {
             // Oyen theme: he peeks on the left and the clock centres in the rest.
+            // Horizon theme: celestial icon synced with Prayer Times sits on the left.
             let body = if oyen::on(st.settings.theme) {
                 draw_oyen_rest(ui, st, body, body.x + 11.0 + OYEN_CLOCK_W / 2.0, OYEN_CLOCK_W, body.bottom() - 5.0);
                 Rect::new(body.x + OYEN_CLOCK_LEAD, body.y, body.w - OYEN_CLOCK_LEAD, body.h)
+            } else if st.settings.theme == poni_core::settings::Theme::Horizon {
+                let icon = crate::pill::horizon::celestial_icon(st);
+                let pal = crate::pill::horizon::palette(st);
+                let r = Rect::new(body.x + 12.0, cy - 7.0, 14.0, 14.0);
+                ui.c.icon(icon, r, pal.accent);
+                Rect::new(body.x + 20.0, body.y, body.w - 20.0, body.h)
             } else {
                 body
             };
@@ -1247,29 +1254,8 @@ mod tests {
 
     #[test]
     fn downloads_show_while_nothing_else_is_live() {
-        let mut st = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
-        assert_eq!(current_activity(&st), Some(Activity::Download));
-        // Music and the timer keep the island while downloads run.
-        let song = with_downloads(playing(None), 1);
-        assert_eq!(current_activity(&song), Some(Activity::Media));
-        st.pomodoro.start(st.now);
-        assert_eq!(current_activity(&st), Some(Activity::Timer));
-        // So do a recording and a game's readout.
-        st.recorder = true;
-        st.store.recorder_island = true;
-        st.rec.phase = Some(poni_core::recorder::Phase::Recording);
-        assert_eq!(current_activity(&st), Some(Activity::Recording));
-        st.rec.phase = None;
-        st.game.active = true;
-        assert_eq!(current_activity(&st), Some(Activity::Game));
-        // Where the Downloader isn't offered (the Mac, for now): never.
-        let mut mac = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
-        mac.downloader_offered = false;
-        assert_eq!(current_activity(&mac), None);
-        // Nor for an account without Studio Pro.
-        let mut free = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
-        free.oyenza.pro = Some(false);
-        assert_eq!(current_activity(&free), None);
+        let st = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
+        assert_eq!(current_activity(&st), None, "downloader add-on is removed");
     }
 
     #[test]

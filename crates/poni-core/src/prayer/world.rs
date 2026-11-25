@@ -14,9 +14,11 @@ use super::{distance_km, Clock, Method, Place};
 
 /// Ids of places from this list: "w:" and the point as the file writes it.
 pub const ID_PREFIX: &str = "w:";
-/// Where the files are (the website, `site/places/1/`). A new format goes
+/// Where the files are (configured in `brand.toml`). A new format goes
 /// in a new folder, so copies that read this one keep working.
-pub const BASE_URL: &str = "https://studio.oyenza.com/places/1/";
+pub fn base_url() -> Option<&'static str> {
+    crate::brand::places_base_url()
+}
 /// The squares of the `near/` files, in degrees.
 const SQUARE_DEG: f64 = 5.0;
 
@@ -51,8 +53,8 @@ pub fn files_near(lat: f64, lng: f64, km: f64) -> Vec<String> {
 }
 
 /// A file's address ("ed" or "near/55_-5").
-pub fn url(file: &str) -> String {
-    format!("{BASE_URL}{file}.txt")
+pub fn url(file: &str) -> Option<String> {
+    base_url().map(|base| format!("{base}{file}.txt"))
 }
 
 pub struct World {

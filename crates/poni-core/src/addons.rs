@@ -13,7 +13,7 @@ use crate::settings::Settings;
 use crate::sha256;
 
 /// Where the files live: `<RELEASES>/<tag>/<name>`.
-pub const RELEASES: &str = "https://github.com/lucacadalora/oyenza-studio/releases/download";
+pub const RELEASES: &str = concat!(env!("BRAND_REPO_URL"), "/releases/download");
 
 /// One file an add-on downloads.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -90,7 +90,10 @@ impl Addon {
     pub fn url(&self, file: &AddonFile) -> String {
         match file.url {
             Some(url) => url.to_string(),
-            None => format!("{RELEASES}/{}/{}", self.tag, file.name),
+            None => {
+                let base = crate::brand::addons_releases_url().unwrap_or(RELEASES);
+                format!("{base}/{}/{}", self.tag, file.name)
+            }
         }
     }
 
@@ -195,7 +198,7 @@ pub const SYSTEM: Addon = Addon {
 pub const HEALTH: Addon = Addon {
     id: "health",
     title: "Health",
-    blurb: "Your steps from Oyenza on your phone: today against your goal, and your week.",
+    blurb: "Your steps from your phone: today against your goal, and your week.",
     mac_blurb: None,
     tag: "",
     files: &[],
@@ -209,7 +212,7 @@ pub const HEALTH: Addon = Addon {
 pub const STOCKS: Addon = Addon {
     id: "stocks",
     title: "Stocks",
-    blurb: "The IHSG and up to 10 IDX stocks from oyenza.trade, 10 minutes behind IDX.",
+    blurb: "The IHSG and up to 10 IDX stocks, 10 minutes behind IDX.",
     mac_blurb: None,
     tag: "",
     files: &[],
@@ -240,7 +243,7 @@ pub const CAFFEINE: Addon = Addon {
 pub const SCREEN_RECORDER: Addon = Addon {
     id: "recorder",
     title: "Screen recorder",
-    blurb: "Record your screen from the island, with Oyenza Studio Recorder.",
+    blurb: concat!("Record your screen from the island, with ", env!("BRAND_APP_NAME"), " Recorder."),
     mac_blurb: None,
     tag: "",
     files: &[],
@@ -347,7 +350,7 @@ pub const AI_USAGE: Addon = Addon {
 pub const IELTS: Addon = Addon {
     id: "ielts",
     title: "IELTS",
-    blurb: "Practise IELTS Speaking out loud: Oyen asks, listens and gives you a band.",
+    blurb: "Practise IELTS Speaking out loud: the coach asks, listens and gives you a band.",
     mac_blurb: None,
     tag: "",
     files: &[],
@@ -365,7 +368,7 @@ pub const IELTS: Addon = Addon {
 pub const MEETING_NOTES: Addon = Addon {
     id: "notes",
     title: "Meeting notes",
-    blurb: "One click and Oyen listens to your meeting, Meet, Zoom or Teams, and writes the notes.",
+    blurb: "One click to listen to your meeting, Meet, Zoom or Teams, and write the notes.",
     mac_blurb: None,
     tag: "",
     files: &[],
@@ -373,28 +376,16 @@ pub const MEETING_NOTES: Addon = Addon {
 };
 
 /// Every add-on, in the order the Add-ons page lists them.
-pub const ALL: [&Addon; 12] = [&PRAYER_TIMES, &JAPANESE_READINGS, &SCRIPT_READER, &SYSTEM, &HEALTH, &STOCKS, &CAFFEINE, &SCREEN_RECORDER, &AI_USAGE, &MEETING_NOTES, &IELTS, &DOWNLOADER];
+pub const ALL: [&Addon; 3] = [&SYSTEM, &SCREEN_RECORDER, &IELTS];
 
-/// Whether Japanese readings switch themselves on for a song whose kanji went
-/// unread for want of them (`wants`): only while the person reads
-/// pronunciations, and only if they never switched the add-on on or off
-/// themselves (one switched off by hand stays off).
-pub fn ja_switches_on(settings: &Settings, wants: bool) -> bool {
-    wants && settings.lyrics_pronunciation && settings.addon_unset(JAPANESE_READINGS.id)
+/// Japanese readings add-on is removed in this build.
+pub fn ja_switches_on(_settings: &Settings, _wants: bool) -> bool {
+    false
 }
 
-/// What the Music page says under a Japanese song whose kanji went unread for
-/// want of Japanese readings, by where that add-on stands, and whether a
-/// click gets it (switches it on). None once it's in place.
-pub fn ja_offer(status: Status) -> Option<(String, bool)> {
-    match status {
-        Status::Off => Some((format!("Romaji for kanji: get Japanese readings ({})", fmt_bytes(JAPANESE_READINGS.size())), true)),
-        Status::Checking => Some(("Checking Japanese readings\u{2026}".to_string(), false)),
-        Status::Downloading { done, total } => Some((format!("Getting Japanese readings \u{b7} {} of {}", fmt_bytes(done), fmt_bytes(total)), false)),
-        Status::Waiting => Some(("Japanese readings download once you're online".to_string(), false)),
-        Status::Failed | Status::Unpinned => Some(("Japanese readings didn't download: see Add-ons".to_string(), false)),
-        Status::Ready => None,
-    }
+/// Japanese readings add-on is removed in this build.
+pub fn ja_offer(_status: Status) -> Option<(String, bool)> {
+    None
 }
 
 /// Where an add-on stands, as the Add-ons page shows it.
@@ -456,35 +447,19 @@ mod tests {
 
     #[test]
     fn japanese_readings_switch_on_once_for_a_song_that_needs_them() {
-        let mut s = Settings::default();
-        assert!(ja_switches_on(&s, true), "the first Japanese song with unread kanji");
-        assert!(!ja_switches_on(&s, false), "a song that reads without them");
-        s.lyrics_pronunciation = false;
-        assert!(!ja_switches_on(&s, true), "pronunciations off: nothing to read them for");
-        s.lyrics_pronunciation = true;
-        s.set_addon(JAPANESE_READINGS.id, true);
-        assert!(!ja_switches_on(&s, true), "already on");
-        s.set_addon(JAPANESE_READINGS.id, false);
-        assert!(!ja_switches_on(&s, true), "switched off by hand: stays off");
-        // Another add-on's switch doesn't count as an answer.
-        let mut s = Settings::default();
-        s.set_addon(PRAYER_TIMES.id, false);
-        assert!(ja_switches_on(&s, true));
+        let s = Settings::default();
+        assert!(!ja_switches_on(&s, true), "japanese readings add-on is removed");
     }
 
     #[test]
     fn script_reader_is_built_in() {
-        assert!(!SCRIPT_READER.downloads() && SCRIPT_READER.size() == 0);
-        assert!(PRAYER_TIMES.downloads() && JAPANESE_READINGS.downloads());
-        assert_eq!(Status::Ready.line(&SCRIPT_READER, false), "On");
-        assert_eq!(Status::Off.line(&SCRIPT_READER, true), "A teleprompter under your webcam.");
-        assert_eq!(Addon::find("script"), Some(&SCRIPT_READER));
+        assert_eq!(Addon::find("script"), None, "script reader add-on is removed");
     }
 
     #[test]
     fn pro_is_ai_usage_meeting_notes_ielts_and_the_downloader() {
         let pro: Vec<&str> = ALL.iter().filter(|a| a.pro).map(|a| a.id).collect();
-        assert_eq!(pro, vec!["ai", "notes", "ielts", "downloader"]);
+        assert_eq!(pro, vec!["ielts"]);
     }
 
     #[test]
@@ -502,17 +477,15 @@ mod tests {
 
     #[test]
     fn built_in_add_ons_are_off_until_switched_on() {
-        for a in [&SYSTEM, &HEALTH, &STOCKS, &CAFFEINE, &IELTS, &MEETING_NOTES] {
+        for a in [&SYSTEM, &IELTS] {
             assert!(!a.downloads() && a.size() == 0, "{}", a.id);
             assert_eq!(Addon::find(a.id), Some(a));
             assert_eq!(Status::Ready.line(a, false), "On");
             assert!(!Settings::default().addon_on(a.id), "{} is off for everyone until they switch it on", a.id);
         }
-        // Clipboard history left the app after 0.2.8: no add-on by that id.
-        assert_eq!(Addon::find("clipboard"), None);
-        // Notifications left the add-ons after 0.2.24: it's on wherever Windows
-        // lets the copy read notifications, and Settings' tabs row switches it off.
-        assert_eq!(Addon::find("notifications"), None);
+        for removed in ["clipboard", "notifications", "sholat", "ja", "script", "health", "stocks", "caffeine", "ai", "notes", "downloader"] {
+            assert_eq!(Addon::find(removed), None, "{removed} should not be in ALL");
+        }
     }
 
     #[test]
@@ -559,8 +532,8 @@ mod tests {
             assert_eq!(f.name, name);
             assert!(f.matches(bytes), "{name}: size {} sha256 {}", bytes.len(), sha256::hex(&sha256::sha256(bytes)));
         }
-        let ja = Addon::find("ja").unwrap();
-        assert_eq!(ja.url(&ja.files[0]), "https://github.com/lucacadalora/oyenza-studio/releases/download/addon-ja-1/ja-readings.dic.zst");
+        let ja = &JAPANESE_READINGS;
+        assert_eq!(ja.url(&ja.files[0]), format!("{RELEASES}/addon-ja-1/ja-readings.dic.zst"));
         assert_eq!(Status::Off.line(ja, false), ja.blurb);
         assert_eq!(Status::Ready.line(ja, false), "On · 3.8 MB on this PC");
         // The Mac app has no Windows reason to give, and says Mac.
@@ -571,20 +544,15 @@ mod tests {
 
     #[test]
     fn the_music_page_offers_japanese_readings_until_they_are_here() {
-        assert_eq!(ja_offer(Status::Off), Some(("Romaji for kanji: get Japanese readings (3.8 MB)".to_string(), true)));
-        let (line, click) = ja_offer(Status::Downloading { done: 1_700_000, total: JAPANESE_READINGS.size() }).unwrap();
-        assert_eq!(line, "Getting Japanese readings · 1.7 MB of 3.8 MB");
-        assert!(!click);
-        for s in [Status::Checking, Status::Waiting, Status::Failed] {
-            assert!(ja_offer(s).is_some_and(|(_, click)| !click), "{s:?} says where it stands, nothing to click");
+        for s in [Status::Off, Status::Checking, Status::Waiting, Status::Failed, Status::Ready] {
+            assert_eq!(ja_offer(s), None);
         }
-        assert_eq!(ja_offer(Status::Ready), None);
     }
 
     #[test]
     fn files_come_from_the_release() {
-        let a = Addon::find("sholat").unwrap();
-        assert_eq!(a.url(&a.files[1]), "https://github.com/lucacadalora/oyenza-studio/releases/download/addon-sholat-3/adzan.m4a");
+        let a = &PRAYER_TIMES;
+        assert_eq!(a.url(&a.files[1]), format!("{RELEASES}/addon-sholat-3/adzan.m4a"));
         assert_eq!(a.size(), 959_353);
         assert!(Addon::find("nope").is_none());
     }
@@ -604,9 +572,8 @@ mod tests {
 
     #[test]
     fn add_ons_are_listed_in_order_each_with_its_own_id() {
-        // The Add-ons page's order: the free ones, then Studio Pro's.
         let ids: Vec<&str> = ALL.iter().map(|a| a.id).collect();
-        assert_eq!(ids, ["sholat", "ja", "script", "system", "health", "stocks", "caffeine", "recorder", "ai", "notes", "ielts", "downloader"]);
+        assert_eq!(ids, ["system", "recorder", "ielts"]);
         for (i, a) in ALL.iter().enumerate() {
             // The key in settings.json and the folder's name.
             assert!(!a.id.is_empty() && a.id.bytes().all(|b| b.is_ascii_lowercase()), "{}", a.id);
@@ -625,7 +592,6 @@ mod tests {
     #[test]
     fn the_downloader_takes_its_tools_from_their_own_releases() {
         // Each app has its own tools, under the names it runs them by.
-        assert_eq!(Addon::find("downloader"), Some(&DOWNLOADER));
         let names = |d: &Addon| d.files.iter().map(|f| f.name).collect::<Vec<_>>();
         assert_eq!(names(&DOWNLOADER), [YTDLP_EXE, QJS_EXE, FFMPEG_EXE, "NOTICE.txt"]);
         assert_eq!(names(&DOWNLOADER_WINDOWS), ["yt-dlp.exe", "qjs.exe", "ffmpeg.exe", "NOTICE.txt"]);
@@ -654,7 +620,7 @@ mod tests {
         }
         assert_eq!(ytdlp_tags[0], ytdlp_tags[1], "yt-dlp: the same version on Windows and the Mac");
         // Our own builds and the notices: each add-on's own pre-release.
-        let ours = "https://github.com/lucacadalora/oyenza-studio/releases/download";
+        let ours = RELEASES;
         assert_eq!(w.url(&w.files[2]), format!("{ours}/addon-downloader-1/ffmpeg.exe"));
         assert_eq!(w.url(&w.files[3]), format!("{ours}/addon-downloader-1/NOTICE.txt"));
         for (f, name) in m.files[1..].iter().zip(["qjs", "ffmpeg", "NOTICE.txt"]) {
@@ -697,7 +663,7 @@ mod tests {
         assert!(!s.is_on() && s.progress().is_none());
         assert_eq!(s.line(&SOON, false), "This version can't get its files yet, so it stays off.");
         assert_eq!(s.line(&SOON, true), s.line(&SOON, false));
-        assert!(ja_offer(s).is_some_and(|(_, click)| !click));
+        assert_eq!(ja_offer(s), None);
     }
 
     #[test]
@@ -707,7 +673,7 @@ mod tests {
         for (d, bytes) in [(DOWNLOADER_WINDOWS, windows), (DOWNLOADER_MAC, mac)] {
             let notice = d.files.iter().find(|f| f.name == "NOTICE.txt").unwrap();
             assert!(notice.matches(bytes), "{}: size {} sha256 {}", d.tag, bytes.len(), sha256::hex(&sha256::sha256(bytes)));
-            assert_eq!(d.url(notice), format!("https://github.com/lucacadalora/oyenza-studio/releases/download/{}/NOTICE.txt", d.tag));
+            assert_eq!(d.url(notice), format!("{RELEASES}/{}/NOTICE.txt", d.tag));
         }
     }
 

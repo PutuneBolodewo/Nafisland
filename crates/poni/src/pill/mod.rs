@@ -23,6 +23,7 @@
 
 pub mod diorama;
 pub mod expanded;
+pub mod horizon;
 pub mod hud;
 pub mod idle;
 pub mod live;
@@ -66,6 +67,7 @@ pub fn look(st: &AppState, around_notch: bool) -> &'static poni_core::look::Look
             };
             poni_core::look::diorama(night)
         }
+        Theme::Horizon => poni_core::look::horizon(horizon::palette(st).light),
         theme if around_notch => poni_core::look::around_notch(theme),
         theme => poni_core::look::of(theme),
     }

@@ -7,11 +7,16 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Where every copy looks.
-pub const FEED_URL: &str = "https://studio.oyenza.com/latest.json";
-/// Downloads only ever come from this repository's releases.
-const DOWNLOADS: &str = "https://github.com/lucacadalora/oyenza-studio/releases/download/v";
-const RELEASE_PAGE: &str = "https://github.com/lucacadalora/oyenza-studio/releases/tag/v";
+/// Where every copy looks, or `None` when auto-update is disabled.
+pub fn feed_url() -> Option<&'static str> {
+    crate::brand::update_feed_url()
+}
+fn downloads_prefix() -> String {
+    format!("{}/releases/download/v", crate::brand::REPO_URL)
+}
+fn release_page_prefix() -> String {
+    format!("{}/releases/tag/v", crate::brand::REPO_URL)
+}
 /// The file's layout this version reads. A file with a newer one is ignored
 /// (a later version of the app will read it).
 pub const SCHEMA: u64 = 1;
@@ -111,7 +116,8 @@ impl Download {
     /// The version whose release this file is ("0.2.5"), from its address:
     /// [`parse_payload`] made sure it is that release's own.
     pub fn version(&self) -> Option<&str> {
-        self.url.strip_prefix(DOWNLOADS)?.split('/').next().filter(|v| parts(v).is_some())
+        let prefix = downloads_prefix();
+        self.url.strip_prefix(&prefix)?.split('/').next().filter(|v| parts(v).is_some())
     }
 }
 
@@ -138,10 +144,10 @@ pub fn parse_payload(text: &str) -> Result<Release, String> {
     if parts(&p.version).is_none() {
         return Err(format!("\"{:.20}\" isn't a version", p.version));
     }
-    if p.notes != format!("{RELEASE_PAGE}{}", p.version) {
+    if p.notes != format!("{}{}", release_page_prefix(), p.version) {
         return Err("its notes aren't this repository's release page".into());
     }
-    let prefix = format!("{DOWNLOADS}{}/", p.version);
+    let prefix = format!("{}{}/", downloads_prefix(), p.version);
     for d in p.windows.iter().chain(&p.mac) {
         let name = d.url.strip_prefix(&prefix).unwrap_or_default();
         let plain = !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
@@ -159,7 +165,7 @@ fn headline(text: &str, version: &str) -> String {
     let clean: String = text.chars().map(|c| if c.is_control() { ' ' } else { c }).collect();
     let mut line = clean.split_whitespace().collect::<Vec<_>>().join(" ");
     if line.is_empty() {
-        line = format!("Oyenza Studio {version}");
+        line = format!("{} {version}", crate::brand::APP_NAME);
     }
     if line.chars().count() > HEADLINE_MAX {
         line = line.chars().take(HEADLINE_MAX - 1).collect::<String>().trim_end().to_string() + "…";
@@ -277,8 +283,9 @@ mod tests {
     const SHA: &str = "8f30919c3c13e7074ae0381d9b478e1ef5fb802476b637f5febefe949d26e26b";
 
     fn payload(version: &str, extra: &str) -> String {
+        let repo = crate::brand::REPO_URL;
         format!(
-            r#"{{"schema":1,"version":"{version}","date":"2026-10-25","headline":"Sing along from the closed island","notes":"https://github.com/lucacadalora/oyenza-studio/releases/tag/v{version}","windows":{{"url":"https://github.com/lucacadalora/oyenza-studio/releases/download/v{version}/Oyenza-Studio-Setup-{version}.exe","size":2457657,"sha256":"{SHA}"}}{extra}}}"#
+            r#"{{"schema":1,"version":"{version}","date":"2026-10-25","headline":"Sing along from the closed island","notes":"{repo}/releases/tag/v{version}","windows":{{"url":"{repo}/releases/download/v{version}/Setup-{version}.exe","size":2457657,"sha256":"{SHA}"}}{extra}}}"#
         )
     }
 
@@ -309,8 +316,8 @@ mod tests {
         assert_eq!((r.version.as_str(), r.date.as_str(), r.headline.as_str()), (V, "2026-10-25", "Sing along from the closed island"));
         assert_eq!(r.download(false).map(|d| d.size), Some(2457657));
         assert_eq!(r.download(true), None, "no DMG yet");
-        let mac = r#","mac":{"url":"https://github.com/lucacadalora/oyenza-studio/releases/download/v0.2.3/Oyenza-Studio-0.2.3-mac.dmg","size":3667341,"sha256":"fabc80efc387be83d7f82702bede7c3d2470f7aa6ef62cc2a8cd095a425f3fb9"}"#;
-        let r = parse_payload(&payload(V, mac)).unwrap();
+        let mac = format!(r#","mac":{{"url":"{}/releases/download/v0.2.3/App-0.2.3-mac.dmg","size":3667341,"sha256":"fabc80efc387be83d7f82702bede7c3d2470f7aa6ef62cc2a8cd095a425f3fb9"}}"#, crate::brand::REPO_URL);
+        let r = parse_payload(&payload(V, &mac)).unwrap();
         assert_eq!(r.download(true).map(|d| d.size), Some(3667341));
         // Each download knows its release's version (a Mac checks the app in the DMG against it).
         assert_eq!(r.download(true).and_then(|d| d.version()), Some(V));
@@ -323,9 +330,9 @@ mod tests {
     fn a_payload_pointing_elsewhere_is_refused() {
         let p = payload(V, "");
         // Downloads from another place, another version's folder, or a path that climbs out.
-        assert!(parse_payload(&p.replace("https://github.com/lucacadalora/oyenza-studio/releases/download", "https://example.com/x")).is_err());
+        assert!(parse_payload(&p.replace(&format!("{}/releases/download", crate::brand::REPO_URL), "https://example.com/x")).is_err());
         assert!(parse_payload(&p.replace("download/v0.2.3/", "download/v0.2.2/")).is_err());
-        assert!(parse_payload(&p.replace("Oyenza-Studio-Setup-0.2.3.exe", "../../x/evil.exe")).is_err());
+        assert!(parse_payload(&p.replace("Setup-0.2.3.exe", "../../x/evil.exe")).is_err());
         // Notes elsewhere, a bad hash, a newer layout, not a version.
         assert!(parse_payload(&p.replace("releases/tag/v0.2.3", "releases/tag/v9.9.9")).is_err());
         assert!(parse_payload(&p.replace(SHA, &SHA.to_uppercase())).is_err());
@@ -339,7 +346,7 @@ mod tests {
         let r = parse_payload(&payload(V, "").replace("Sing along from the closed island", &format!("{long}\\nmore"))).unwrap();
         assert!(r.headline.chars().count() <= HEADLINE_MAX && r.headline.ends_with('…') && !r.headline.contains('\n'), "{}", r.headline);
         let r = parse_payload(&payload(V, "").replace("Sing along from the closed island", "")).unwrap();
-        assert_eq!(r.headline, "Oyenza Studio 0.2.3");
+        assert_eq!(r.headline, format!("{} 0.2.3", crate::brand::APP_NAME));
     }
 
     #[test]
@@ -404,7 +411,7 @@ mod tests {
     fn a_download_knows_its_file() {
         let r = parse_payload(&payload(V, "")).unwrap();
         let d = r.download(false).unwrap();
-        assert_eq!(d.file_name(), "Oyenza-Studio-Setup-0.2.3.exe");
+        assert_eq!(d.file_name(), "Setup-0.2.3.exe");
         let bytes = b"not the installer";
         let real = Download { url: d.url.clone(), size: bytes.len() as u64, sha256: crate::sha256::hex(&crate::sha256::sha256(bytes)) };
         assert!(real.matches(bytes));

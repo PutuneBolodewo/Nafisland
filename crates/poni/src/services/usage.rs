@@ -42,7 +42,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
-const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
+const USER_AGENT: &str = concat!(env!("BRAND_APP_NAME"), "/", env!("CARGO_PKG_VERSION"), " (+", env!("BRAND_REPO_URL"), ")");
 /// Budget for one request: connect, headers and body.
 const TIMEOUT: Duration = Duration::from_secs(8);
 /// A typed key longer than this is a paste gone wrong.

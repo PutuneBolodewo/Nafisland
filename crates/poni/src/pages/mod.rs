@@ -769,21 +769,17 @@ mod tests {
 
     #[test]
     fn the_row_is_the_island_s_own_pages_then_oyenza_then_the_plus() {
-        // Music, then Today beside it; Focus where Today was; AI after it,
-        // with Studio Pro; Oyenza last, signed in or not.
         use PageKind::*;
         let mut st = state();
         assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Oyenza, Addons]);
         st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
         assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Oyenza, Addons]);
         st.oyenza.pro = Some(true);
-        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Ai, Oyenza, Addons]);
-        // The add-ons' pages come after Oyenza (Health, Oyenza's steps, first), before the "+".
+        assert_eq!(tabs(&st), [Media, Today, Shelf, Tasks, Focus, Oyenza, Addons]);
         for id in ["system", "script", "health"] {
             st.addons.insert(id, poni_core::addons::Status::Ready);
         }
-        assert_eq!(&tabs(&st)[6..], [Oyenza, Health, System, Script, Addons]);
-        // Clipboard left the app: an island last open there opens on Music.
+        assert_eq!(&tabs(&st)[5..], [Oyenza, System, Addons]);
         assert_eq!(PageKind::from_key("clipboard"), Media);
     }
 
@@ -866,41 +862,30 @@ mod tests {
     #[test]
     fn ai_has_a_tab_only_with_studio_pro_and_never_makes_the_window_taller() {
         let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Ai), "signed out");
         st.oyenza.link = OyenzaLink::Connected { account: "a\u{2022}\u{2022}\u{2022}@example.com".into() };
-        assert!(!tabs(&st).contains(&PageKind::Ai), "before the server's answer");
-        st.oyenza.pro = Some(false);
-        assert!(!tabs(&st).contains(&PageKind::Ai), "an account without Pro");
         st.oyenza.pro = Some(true);
-        assert!(tabs(&st).contains(&PageKind::Ai), "on with Pro, nothing to switch on");
-        st.settings.set_addon(poni_core::addons::AI_USAGE.id, false);
-        assert!(!tabs(&st).contains(&PageKind::Ai), "switched off under Add-ons");
+        assert!(!tabs(&st).contains(&PageKind::Ai), "AI usage add-on is removed");
         assert_eq!(PageKind::from_key("ai"), PageKind::Ai);
-        // Pro isn't known yet at start: an island last open on the AI tab opens on the first tab.
         let store = Store { last_page: "ai".into(), ..Store::default() };
         assert_eq!(AppState::new(Settings { remember_page: true, ..Settings::default() }, store).page, PageKind::ALL[0]);
-        assert!(content_height(PageKind::Ai, &st) <= content_height(PageKind::System, &st));
     }
 
     #[test]
     fn system_health_and_stocks_have_a_tab_only_while_their_add_ons_are_on() {
-        for (page, addon) in [
-            (PageKind::System, poni_core::addons::SYSTEM),
-            (PageKind::Health, poni_core::addons::HEALTH),
-            (PageKind::Stocks, poni_core::addons::STOCKS),
-            (PageKind::Caffeine, poni_core::addons::CAFFEINE),
-        ] {
-            let mut st = state();
-            assert!(!tabs(&st).contains(&page), "{} is off for everyone until switched on", addon.id);
-            st.settings.set_addon(addon.id, true);
-            st.addons.insert(addon.id, poni_core::addons::Status::Ready);
-            assert!(tabs(&st).contains(&page));
-            // An island last open on its page opens on the first tab while it's off.
-            let store = Store { last_page: page.key().into(), ..Store::default() };
-            let mut settings = Settings { remember_page: true, ..Settings::default() };
-            assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::ALL[0]);
-            settings.set_addon(addon.id, true);
-            assert_eq!(AppState::new(settings, store).page, page);
+        let mut st = state();
+        let addon = poni_core::addons::SYSTEM;
+        assert!(!tabs(&st).contains(&PageKind::System), "{} is off for everyone until switched on", addon.id);
+        st.settings.set_addon(addon.id, true);
+        st.addons.insert(addon.id, poni_core::addons::Status::Ready);
+        assert!(tabs(&st).contains(&PageKind::System));
+        let store = Store { last_page: PageKind::System.key().into(), ..Store::default() };
+        let mut settings = Settings { remember_page: true, ..Settings::default() };
+        assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::ALL[0]);
+        settings.set_addon(addon.id, true);
+        assert_eq!(AppState::new(settings, store).page, PageKind::System);
+        for (page, id) in [(PageKind::Health, "health"), (PageKind::Stocks, "stocks"), (PageKind::Caffeine, "caffeine")] {
+            st.addons.insert(id, poni_core::addons::Status::Ready);
+            assert!(!tabs(&st).contains(&page), "{id} add-on is removed");
         }
     }
 
@@ -924,27 +909,13 @@ mod tests {
 
     #[test]
     fn downloads_has_a_tab_only_with_studio_pro() {
-        for (page, addon) in [(PageKind::Downloads, poni_core::addons::DOWNLOADER)] {
-            let mut st = state();
-            st.downloader_offered = true;
-            st.settings.set_addon(addon.id, true);
-            st.addons.insert(addon.id, poni_core::addons::Status::Ready);
-            assert!(!tabs(&st).contains(&page), "{}: signed out", addon.id);
-            st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
-            assert!(!tabs(&st).contains(&page), "{}: before the server's answer", addon.id);
-            st.oyenza.pro = Some(false);
-            assert!(!tabs(&st).contains(&page), "{}: an account without Pro", addon.id);
-            st.oyenza.pro = Some(true);
-            assert!(tabs(&st).contains(&page), "{}", addon.id);
-            // Signed out again: gone, whatever the server said before.
-            st.oyenza.link = OyenzaLink::Off;
-            assert!(!tabs(&st).contains(&page), "{}", addon.id);
-            // Pro isn't known yet at start: an island last open on its page opens on the first tab.
-            let store = Store { last_page: page.key().into(), ..Store::default() };
-            let mut settings = Settings { remember_page: true, ..Settings::default() };
-            settings.set_addon(addon.id, true);
-            assert_eq!(AppState::new(settings, store).page, PageKind::ALL[0], "{}", addon.id);
-        }
+        let mut st = state();
+        st.downloader_offered = true;
+        st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
+        st.oyenza.pro = Some(true);
+        st.settings.set_addon(poni_core::addons::DOWNLOADER.id, true);
+        st.addons.insert(poni_core::addons::DOWNLOADER.id, poni_core::addons::Status::Ready);
+        assert!(!tabs(&st).contains(&PageKind::Downloads), "downloader add-on is removed");
     }
 
     #[test]
@@ -968,28 +939,21 @@ mod tests {
     #[test]
     fn prayer_has_a_tab_only_while_its_add_on_is_on_and_ready() {
         let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Prayer));
-        st.addons.insert("sholat", poni_core::addons::Status::Ready);
         assert!(!tabs(&st).contains(&PageKind::Prayer), "no places read yet");
         let list = poni_core::prayer::PlaceList::parse(r#"{"places":[]}"#).unwrap();
         st.prayer.places = Some(std::sync::Arc::new(list));
         let row = tabs(&st);
         assert_eq!(&row[row.len() - 2..], &[PageKind::Prayer, PageKind::Addons]);
         assert!(content_height(PageKind::Prayer, &st) <= content_height(PageKind::Tasks, &st));
-        st.addons.insert("sholat", poni_core::addons::Status::Downloading { done: 1, total: 2 });
-        assert!(!tabs(&st).contains(&PageKind::Prayer));
     }
 
     #[test]
     fn ielts_has_a_tab_only_while_its_add_on_is_on_after_health() {
-        use PageKind::{Addons, Health, Ielts, Oyenza};
+        use PageKind::{Addons, Ielts, Oyenza};
         let mut st = state();
         assert!(!tabs(&st).contains(&Ielts), "off for everyone until switched on");
         st.addons.insert("ielts", poni_core::addons::Status::Ready);
-        st.addons.insert("health", poni_core::addons::Status::Ready);
-        assert_eq!(&tabs(&st)[5..], [Oyenza, Health, Ielts, Addons]);
-        // Signed out it shows the sign-in card; signed in, every state is as
-        // tall, and never taller than System: the window keeps its size.
+        assert_eq!(&tabs(&st)[5..], [Oyenza, Ielts, Addons]);
         let signed_out = content_height(Ielts, &st);
         st.oyenza.link = OyenzaLink::Connected { account: "a•••@example.com".into() };
         let h = content_height(Ielts, &st);
@@ -998,7 +962,6 @@ mod tests {
             st.ielts = poni_core::ielts::Coach::sample(s, 10.0);
             assert_eq!(content_height(Ielts, &st), h);
         }
-        // An island last open on it opens on the first tab once it's off.
         let store = Store { last_page: "ielts".into(), ..Store::default() };
         let mut settings = Settings { remember_page: true, ..Settings::default() };
         assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::Media);
@@ -1009,10 +972,8 @@ mod tests {
     #[test]
     fn script_has_a_tab_only_while_its_add_on_is_on() {
         let mut st = state();
-        assert!(!tabs(&st).contains(&PageKind::Script), "off for everyone until switched on");
         st.addons.insert("script", poni_core::addons::Status::Ready);
-        assert!(tabs(&st).contains(&PageKind::Script));
-        assert_eq!(tabs(&st).last(), Some(&PageKind::Addons));
+        assert!(!tabs(&st).contains(&PageKind::Script), "script add-on is removed");
     }
 
     #[test]
@@ -1031,11 +992,6 @@ mod tests {
         assert_eq!(row.last(), Some(&PageKind::Addons));
         st.settings.set_addon("recorder", false);
         assert!(!tabs(&st).contains(&PageKind::Record), "switched off: gone");
-        st.settings.set_addon("recorder", true);
-        st.addons.insert("script", poni_core::addons::Status::Ready);
-        let row = tabs(&st);
-        let at = |p| row.iter().position(|t| *t == p).unwrap();
-        assert_eq!(at(PageKind::Record), at(PageKind::Script) + 1, "beside the Script page");
     }
 
     #[test]
@@ -1054,7 +1010,7 @@ mod tests {
         let mut settings = Settings { remember_page: true, ..Settings::default() };
         assert_eq!(AppState::new(settings.clone(), store.clone()).page, PageKind::ALL[0]);
         settings.set_addon("script", true);
-        assert_eq!(AppState::new(settings, store).page, PageKind::Script);
+        assert_eq!(AppState::new(settings, store).page, PageKind::ALL[0]);
     }
 
     #[test]

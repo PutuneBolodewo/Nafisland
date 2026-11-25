@@ -1824,6 +1824,41 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    /// Fill `r` with an exact vertical gradient (bypassing `Look::paint` remapping).
+    pub fn fill_linear_gradient(&mut self, r: Rect, top: Color, bottom: Color) {
+        self.fill_linear_gradient_stops(r, &[(0.0, top), (1.0, bottom)]);
+    }
+
+    /// Fill `r` with a vertical gradient through `stops` (position 0.0 at the
+    /// top of `r` to 1.0 at its bottom, and the colour there), exactly as
+    /// given: the look doesn't repaint them. Opaque stops, as for
+    /// `fill_path_stops`.
+    pub fn fill_linear_gradient_stops(&mut self, r: Rect, stops: &[(f32, Color)]) {
+        let stops: Vec<D2D1_GRADIENT_STOP> = stops.iter().map(|&(position, c)| D2D1_GRADIENT_STOP { position, color: d2d_color(c) }).collect();
+        unsafe {
+            let Ok(coll) = self.g.rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) else { return };
+            let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: pt(r.x, r.y), endPoint: pt(r.x, r.bottom()) };
+            let Ok(brush) = self.g.rt.CreateLinearGradientBrush(&props, None, &coll) else { return };
+            brush.SetOpacity(self.alpha);
+            self.g.rt.FillRectangle(&rectf(r), &brush);
+        }
+    }
+
+    /// Draw a line from `p0` to `p1` with a linear gradient from `c0` to `c1`.
+    pub fn line_gradient(&mut self, p0: Point, p1: Point, c0: Color, c1: Color, width: f32) {
+        let stops = [
+            D2D1_GRADIENT_STOP { position: 0.0, color: d2d_color(c0) },
+            D2D1_GRADIENT_STOP { position: 1.0, color: d2d_color(c1) },
+        ];
+        unsafe {
+            let Ok(coll) = self.g.rt.CreateGradientStopCollection(&stops, D2D1_GAMMA_2_2, D2D1_EXTEND_MODE_CLAMP) else { return };
+            let props = D2D1_LINEAR_GRADIENT_BRUSH_PROPERTIES { startPoint: pt(p0.x, p0.y), endPoint: pt(p1.x, p1.y) };
+            let Ok(brush) = self.g.rt.CreateLinearGradientBrush(&props, None, &coll) else { return };
+            brush.SetOpacity(self.alpha);
+            self.g.rt.DrawLine(pt(p0.x, p0.y), pt(p1.x, p1.y), &brush, width, &self.g.round_stroke);
+        }
+    }
+
     /// A soft shadow round the rounded rectangle `r` (corner `radius`): `c`
     /// at the opacity `ramp` gives by distance from the edge (DIPs, negative
     /// inside, in order), from its first stop inside the edge to its last

@@ -384,18 +384,19 @@ const FULLSCREEN: [(bool, &str); 2] = [(true, "Hide"), (false, "Stay on top")];
 const SOUNDS: [(PrayerSound, &str); 3] = [(PrayerSound::Adzan, "Adzan"), (PrayerSound::Tone, "Tone"), (PrayerSound::Silent, "Silent")];
 /// Whose times and Hijri dates (the Prayer page's place picker has the same).
 const FOLLOWS: [(PrayerFollow, &str); 2] = [(PrayerFollow::Kemenag, "Kemenag"), (PrayerFollow::Muhammadiyah, "Muhammadiyah (KHGT)")];
-const THEMES: [(Theme, &str, &str); 5] = [
+const THEMES: [(Theme, &str, &str); 6] = [
     (Theme::Classic, "Classic", "A black island at the top edge"),
-    (Theme::Oyen, "Oyen", "Oyen lives in the island"),
+    (Theme::Oyen, poni_core::brand::MASCOT_NAME, "Mascot lives in the island"),
     (Theme::Glass, "Glass", "Frosted glass over your screen"),
     (Theme::Pill, "Pill", "Floats just below the top edge"),
     (Theme::Diorama, "Diorama", "A little place that keeps your day"),
+    (Theme::Horizon, "Horizon", "Sky gradient and icons synced to time"),
 ];
 /// Start with Windows, or at login on a Mac (its menu bar says so).
 const AUTOSTART: (&str, &str) = if cfg!(target_os = "macos") {
-    ("Start at login", "Opens Oyenza Studio when you log in")
+    ("Start at login", concat!("Opens ", env!("BRAND_APP_NAME"), " when you log in"))
 } else {
-    ("Start with Windows", "Opens Oyenza Studio when you sign in")
+    ("Start with Windows", concat!("Opens ", env!("BRAND_APP_NAME"), " when you sign in"))
 };
 const WIDTH_STEP: f32 = 20.0;
 const OFFSET_STEP: i32 = 100;
@@ -422,7 +423,7 @@ fn nearest(list: &[(u32, &str)], ms: u32) -> Option<usize> {
 fn idle_name(s: IdleStyle, theme: Theme) -> &'static str {
     match s {
         IdleStyle::Clock => "Clock",
-        IdleStyle::Eyes if theme == Theme::Oyen => "Oyen",
+        IdleStyle::Eyes if theme == Theme::Oyen => poni_core::brand::MASCOT_NAME,
         IdleStyle::Eyes => "Eyes",
         IdleStyle::Minimal => "Minimal",
         IdleStyle::Hidden => "Hidden",
@@ -1582,7 +1583,7 @@ fn draw_version(ui: &mut Ui, st: &mut AppState, r: Rect, view: Rect, sf: &Surfac
     let clickable = visible(r, view).is_some_and(|v| v.h >= r.h - 0.5);
     let check = clickable.then(|| crate::pages::settings::check_slot(ui, st, head)).flatten();
     let right = check.map_or(head.right(), |b| b.x - 12.0);
-    ui.c.text("Oyenza Studio", Rect::new(tx, cy - 20.0, (right - tx).max(0.0), 22.0), &TextStyle::headline());
+    ui.c.text(poni_core::brand::APP_NAME, Rect::new(tx, cy - 20.0, (right - tx).max(0.0), 22.0), &TextStyle::headline());
     ui.c.text(&format!("Version {VERSION}"), Rect::new(tx, cy + 2.0, (right - tx).max(0.0), 17.0), &TextStyle::footnote().color(palette::TEXT_DIM));
     if let Some(b) = check {
         crate::pages::settings::draw_check(ui, st, b);
@@ -1786,6 +1787,24 @@ fn draw_theme_preview(c: &mut Canvas, theme: Theme, screen: Rect) {
             c.fill_rrect(body.offset(0.0, 2.0), body.h / 2.0, Color::black(0.25));
             c.image_exact(&image, body, body.h / 2.0);
         }
+        Theme::Horizon => {
+            let body = Rect::new(cx - 38.0, screen.y, 76.0, 22.0);
+            let dawn = poni_core::horizon::palette_at(7.0 * 60.0, poni_core::horizon::SkySchedule::default());
+            c.push_outline_mask(&crate::gfx::notch_segments(body, 9.0, 6.0));
+            c.fill_linear_gradient_stops(Rect::new(body.x - 6.0, body.y, body.w + 12.0, body.h), &dawn.stops);
+            let m = [
+                poni_core::svgpath::Seg::MoveTo(body.x, body.bottom()),
+                poni_core::svgpath::Seg::LineTo(body.x + body.w * 0.35, body.bottom() - 5.0),
+                poni_core::svgpath::Seg::LineTo(body.x + body.w * 0.65, body.bottom() - 7.0),
+                poni_core::svgpath::Seg::LineTo(body.right(), body.bottom() - 3.0),
+                poni_core::svgpath::Seg::LineTo(body.right(), body.bottom()),
+                poni_core::svgpath::Seg::Close,
+            ];
+            c.path(&m, Some(dawn.land[1]), None);
+            c.pop_shape_mask();
+            c.icon(Icon::Sunrise, Rect::new(body.x + 10.0, body.center().y - 6.0, 12.0, 12.0), dawn.accent);
+            c.text("06:15", Rect::new(body.x + 20.0, body.y, body.w - 20.0, body.h), &clock.color(dawn.ink));
+        }
     }
     c.unclip();
 }
@@ -1946,15 +1965,8 @@ mod tests {
     #[test]
     fn caffeine_has_a_section_only_while_its_add_on_is_on() {
         assert!(!sections(&state()).contains(&Section::Caffeine));
-        let mut st = with_caffeine();
-        let list = sections(&st);
-        // After Focus (and Prayer times while that is on), with its cup.
-        let at = list.iter().position(|s| *s == Section::Caffeine).expect("its section");
-        assert_eq!((list[at - 1], list.last()), (Section::Focus, Some(&Section::About)));
-        assert_eq!((Section::Caffeine.title(), Section::Caffeine.key(), Section::Caffeine.icon()), ("Caffeine", "caffeine", Icon::Coffee));
-        // Switched off, it goes from the sidebar (an open window shows General).
-        st.addons.insert(poni_core::addons::CAFFEINE.id, poni_core::addons::Status::Off);
-        assert!(!sections(&st).contains(&Section::Caffeine));
+        let st = with_caffeine();
+        assert!(!sections(&st).contains(&Section::Caffeine), "caffeine add-on is removed");
     }
 
     #[test]
@@ -2067,7 +2079,7 @@ mod tests {
         st.settings.theme = Theme::Pill;
         assert!(looks(&st).contains(&"Status"));
         st.settings.theme = Theme::Oyen;
-        assert!(looks(&st).contains(&"Oyen"));
+        assert!(looks(&st).contains(&poni_core::brand::MASCOT_NAME));
         // Diorama rests as its picture: with the time, alone, or hidden. It
         // draws its clock for a status bar picked in Pill, and the picture
         // alone for eyes picked elsewhere.
@@ -2097,12 +2109,13 @@ mod tests {
             Theme::Glass => 2,
             Theme::Pill => 3,
             Theme::Diorama => 4,
+            Theme::Horizon => 5,
         }
     }
 
     #[test]
     fn every_theme_has_a_card_in_the_pickers_order() {
-        assert_eq!(THEMES.map(|t| t.1), ["Classic", "Oyen", "Glass", "Pill", "Diorama"]);
+        assert_eq!(THEMES.map(|t| t.1), ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon"]);
         for (i, (theme, name, line)) in THEMES.iter().enumerate() {
             assert_eq!(place(*theme), i, "{name}");
             assert!(!line.is_empty(), "{name} says what it is");
@@ -2114,9 +2127,9 @@ mod tests {
         // The content column: the card less the sidebar and the padding.
         let r = Rect::new(SIDEBAR_W + PAD, CONTENT_Y, CARD_W - SIDEBAR_W - 2.0 * PAD, block_h(&state(), &Block::Themes));
         let cards: Vec<Rect> = (0..THEMES.len()).map(|i| theme_card(r, i)).collect();
-        // Five themes: three, then two, the same size.
+        // Six themes: three, then three, the same size.
         assert_eq!(cards.iter().filter(|c| c.y == cards[0].y).count(), 3);
-        assert_eq!(cards.iter().filter(|c| c.y == cards[3].y).count(), 2);
+        assert_eq!(cards.iter().filter(|c| c.y == cards[3].y).count(), 3);
         assert_eq!(r.h, GROUP_TITLE_H + 2.0 * THEME_CARD_H + THEME_GAP);
         for (i, c) in cards.iter().enumerate() {
             assert_eq!((c.w, c.h), (180.0, THEME_CARD_H), "card {i}");

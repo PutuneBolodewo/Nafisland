@@ -10,7 +10,7 @@ use crate::gfx::Gfx;
 use crate::settings_window::{Frame, Key, Painted, Section, View, CARD_H, CARD_W};
 use crate::state::AppState;
 use poni_core::geom::{Point, Rect};
-use windows::core::{w, Result, PCWSTR};
+use windows::core::{w, Result, HSTRING, PCWSTR};
 use windows::Win32::Foundation::{HWND, RECT};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -95,11 +95,12 @@ impl SettingsWindow {
         let (w, h) = surface_px(scale, card_h);
         let x = work.left + ((work.right - work.left) - w) / 2;
         let y = work.top + (((work.bottom - work.top) - h) / 2).max(0);
+        let title = HSTRING::from(format!("{} Advanced Settings", poni_core::brand::APP_NAME));
         let hwnd = unsafe {
             CreateWindowExW(
                 WS_EX_LAYERED | WS_EX_APPWINDOW,
                 CLASS,
-                w!("Oyenza Studio Advanced Settings"),
+                &title,
                 WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
                 x,
                 y,

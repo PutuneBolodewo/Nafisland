@@ -135,6 +135,14 @@ pub enum Icon {
     /// A padlock: an IELTS level not open yet. (The IELTS tab and its answer
     /// button use `Mic`, the Record page's microphone.)
     Lock,
+    /// Horizon theme: daytime sun.
+    Sun,
+    /// Horizon theme: morning sun rising over a mountain.
+    Sunrise,
+    /// Horizon theme: evening sun setting on the horizon.
+    Sunset,
+    /// Horizon theme: midnight sparkle stars.
+    SparkleStars,
 }
 
 /// A service's mark, for its card on the AI tab and its notices.
@@ -334,6 +342,26 @@ pub fn parts(icon: Icon) -> &'static [Part] {
         ],
         // A circle (r 8) less a second one (r 7) up and to the right: both arcs meet where the circles cross.
         Moon => p![s("M19.77 13.9A8 8 0 1 1 10.1 4.23A7 7 0 0 0 19.77 13.9Z")],
+        Sun => p![
+            s("M8 12a4 4 0 1 0 8 0a4 4 0 1 0-8 0"),
+            s("M12 3v2M12 19v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M3 12h2M19 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"),
+        ],
+        Sunrise => p![
+            s("M3 19l5.5-6.5L13 17l3-3.5L21 19"),
+            s("M8 12a4 4 0 0 1 8 0"),
+            s("M12 3.5v2M5.5 6.5l1.4 1.4M18.5 6.5l-1.4 1.4"),
+        ],
+        Sunset => p![
+            s("M3 17.5h18"),
+            s("M6 20.5h12"),
+            s("M8 17.5a4 4 0 0 1 8 0"),
+            s("M12 7v2.5M6.2 10.2l1.6 1.6M17.8 10.2l-1.6 1.6"),
+        ],
+        SparkleStars => p![
+            f("M12 3.5l1.3 4.2 4.2 1.3-4.2 1.3-1.3 4.2-1.3-4.2-4.2-1.3 4.2-1.3z"),
+            f("M17.5 15a1.5 1.5 0 1 0 3 0a1.5 1.5 0 1 0-3 0"),
+            f("M4.5 16.5a1 1 0 1 0 2 0a1 1 0 1 0-2 0"),
+        ],
         Script => p![s("M10 6.5h10"), s("M10 12h10"), s("M10 17.5h6.5"), f("M3.6 9.3v5.4a.8.8 0 0 0 1.2.7l4.3-2.7a.8.8 0 0 0 0-1.4L4.8 8.6a.8.8 0 0 0-1.2.7z")],
         Stop => p![f("M8.2 6.5h7.6a1.7 1.7 0 0 1 1.7 1.7v7.6a1.7 1.7 0 0 1-1.7 1.7H8.2a1.7 1.7 0 0 1-1.7-1.7V8.2a1.7 1.7 0 0 1 1.7-1.7z")],
         Record => p![f("M6.5 12a5.5 5.5 0 1 0 11 0a5.5 5.5 0 1 0-11 0z")],
@@ -494,6 +522,7 @@ mod tests {
         Icon::Ai, Icon::OpenAi, Icon::Claude, Icon::OpenCode, Icon::Gemini, Icon::Antigravity, Icon::Cursor, Icon::Copilot, Icon::Kimi, Icon::Zai,
         Icon::MiniMax, Icon::OpenRouter, Icon::Oyenza,
         Icon::Lock,
+        Icon::Sun, Icon::Sunrise, Icon::Sunset, Icon::SparkleStars,
     ];
 
     #[test]

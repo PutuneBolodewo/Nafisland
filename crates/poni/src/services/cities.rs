@@ -35,9 +35,10 @@ pub fn fetch(file: String, sink: EventSink) {
 }
 
 fn get(file: &str) -> Result<World, String> {
+    let url = world::url(file).ok_or_else(|| "world places server is not configured".to_string())?;
     let _com = MtaGuard::new();
     let client = Client::new(USER_AGENT).map_err(|e| e.to_string())?;
-    let resp = client.get(&world::url(file), TIMEOUT).map_err(|e| e.to_string())?;
+    let resp = client.get(&url, TIMEOUT).map_err(|e| e.to_string())?;
     match resp.status {
         200 => World::parse(resp.body),
         // No file: no city has a name starting so, or none is in that square.

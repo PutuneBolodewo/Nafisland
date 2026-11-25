@@ -307,6 +307,7 @@ pub fn of(theme: Theme) -> &'static Look {
         Theme::Glass => &GLASS_DARK,
         Theme::Pill => &PILL,
         Theme::Diorama => &DIORAMA_DAY,
+        Theme::Horizon => &CLASSIC,
     }
 }
 
@@ -322,6 +323,42 @@ pub fn around_notch(theme: Theme) -> &'static Look {
         Theme::Glass => &GLASS_DARK,
         Theme::Pill => &PILL,
         Theme::Diorama => &DIORAMA_DAY,
+        Theme::Horizon => &CLASSIC,
+    }
+}
+
+pub const HORIZON_LIGHT: Look = Look {
+    ground: Color::hex(0xF4F0DE),
+    ink: Color::hex(0x1D1A22),
+    accent: None,
+    border: Color::rgba(0x1D as f32 / 255.0, 0x1A as f32 / 255.0, 0x22 as f32 / 255.0, 0.14),
+    light: true,
+    font: None,
+    material: Material::Solid,
+    shape: Shape::Notch,
+    frame: None,
+    swaps: GLASS_LIGHT.swaps,
+};
+
+pub const HORIZON_DARK: Look = Look {
+    ground: Color::hex(0x142038),
+    ink: Color::white(1.0),
+    accent: None,
+    border: Color::white(0.14),
+    light: false,
+    font: None,
+    material: Material::Solid,
+    shape: Shape::Notch,
+    frame: None,
+    swaps: &[],
+};
+
+/// The Horizon look for light (`Morning`) or dark (`Day`, `Dusk`, `Night`, `Midnight`) phases.
+pub fn horizon(light: bool) -> &'static Look {
+    if light {
+        &HORIZON_LIGHT
+    } else {
+        &HORIZON_DARK
     }
 }
 

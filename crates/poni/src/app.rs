@@ -86,7 +86,7 @@ const WTS_SESSION_LOCK_: usize = 7;
 const WTS_SESSION_UNLOCK_: usize = 8;
 
 /// Steps for copying the Apple Music token (README).
-const APPLE_MUSIC_HELP_URL: &str = "https://github.com/lucacadalora/oyenza-studio#apple-music-lyrics";
+const APPLE_MUSIC_HELP_URL: &str = concat!(env!("BRAND_REPO_URL"), "#apple-music-lyrics");
 /// Phone drop closes itself after this long without a request from a phone.
 const PHONE_IDLE_S: f64 = 600.0;
 
@@ -764,6 +764,7 @@ impl App {
 
     fn start(&mut self) {
         self.layout_surface();
+        self.prayer_ready();
         let fake = self.selftest.is_some();
         self.st.power = services::power::query();
         services::power::register(self.helper);
@@ -3590,6 +3591,14 @@ impl App {
         if !self.in_selftest && self.last_call.tick(&mut self.st, here) {
             self.request_frame();
         }
+        let horizon_paused = self.locked || self.display_off || self.st.power.saver || self.fullscreen_hidden;
+        let ph = pill::horizon::phase(&self.st);
+        if self.st.settings.theme == Theme::Horizon {
+            self.st.accent = pill::horizon::palette(&self.st).accent;
+        }
+        if self.st.horizon_star.tick(self.st.settings.theme, ph, now, horizon_paused) {
+            self.request_frame();
+        }
         self.ielts_tick();
         self.notes_tick();
         self.script_tick();
@@ -3820,6 +3829,13 @@ impl App {
                         if !hidden_idle {
                             pill::shape::draw_body(&mut canvas, body, geom.r, island_color, border);
                         }
+                    } else if self.st.settings.theme == Theme::Horizon && !hidden_idle {
+                        canvas.push_outline_mask(&crate::gfx::notch_segments(body, geom.r, SHOULDER));
+                        pill::horizon::draw_sky(&mut canvas, &self.st, body, SHOULDER);
+                        canvas.pop_shape_mask();
+                        if let Some(b) = border {
+                            canvas.notch(body, geom.r, SHOULDER, Color::black(0.0), Some(b));
+                        }
                     } else {
                         canvas.notch(body, geom.r, SHOULDER, island_color, border);
                     }
@@ -3968,6 +3984,7 @@ impl App {
             || !self.st.cmds.is_empty()
             || self.outgoing.is_some()
             || self.page_anim.is_some()
+            || self.st.horizon_star.active_from.is_some()
             || self.settings_moving();
         // The display mode's rate, not the measured period: a divisor that
         // flips between 1 and 2 would be the uneven cadence it exists to avoid.
@@ -4100,6 +4117,11 @@ impl App {
         // Caffeine's reminder comes on its minute, the island asleep or not
         // (one wake a day at most).
         if let Some(t) = self.last_call.wake(&self.st) {
+            consider(t);
+        }
+        let horizon_paused = self.locked || self.display_off || self.st.power.saver || self.fullscreen_hidden;
+        let ph = pill::horizon::phase(&self.st);
+        if let Some(t) = self.st.horizon_star.wake_at(self.st.settings.theme, ph, horizon_paused) {
             consider(t);
         }
         if let Mode::Expanded(p) = self.mode {
@@ -4273,12 +4295,14 @@ impl App {
 
     // ------------------------------------------------------------ prayer times
 
-    /// Prayer times' files are in place: read its places, settle the place,
-    /// and ask where the PC is when following the location.
+    /// Prayer times' places are built in (or overridden from the add-on folder):
+    /// read them, settle the place, and ask where the PC is when following the location.
     fn prayer_ready(&mut self) {
+        const BUILTIN_PLACES: &str = include_str!("../../../addons/sholat/places.json");
         let a = &poni_core::addons::PRAYER_TIMES;
         let path = paths::addons_dir().join(a.id).join(a.tag).join("places.json");
-        match std::fs::read_to_string(&path).map_err(|e| e.to_string()).and_then(|t| PlaceList::parse(&t)) {
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|_| BUILTIN_PLACES.to_string());
+        match PlaceList::parse(&text) {
             Ok(list) => {
                 pinfo!("prayer: {} places", list.places.len());
                 self.st.prayer.places = Some(std::sync::Arc::new(list));
@@ -4289,7 +4313,7 @@ impl App {
             }
         }
         self.resolve_prayer_place();
-        if self.st.settings.prayer.follow_location {
+        if self.st.settings.prayer.follow_location && self.selftest.is_none() {
             self.locate();
         }
     }
@@ -5630,6 +5654,12 @@ fn theme_accent(theme: Theme) -> Color {
         poni_core::look::DIORAMA_ACCENT
     } else if theme == Theme::Glass {
         services::system_accent_base().unwrap_or(palette::BLUE)
+    } else if theme == Theme::Horizon {
+        poni_core::horizon::palette_at(
+            (clock::local_now().hour as f32) * 60.0 + clock::local_now().minute as f32,
+            poni_core::horizon::SkySchedule::default(),
+        )
+        .accent
     } else {
         services::system_accent().unwrap_or(palette::BLUE)
     }

@@ -783,6 +783,8 @@ pub struct AppState {
     pub ui: PageUiState,
     /// System accent colour (falls back to blue).
     pub accent: Color,
+    /// Horizon theme shooting star animation & schedule.
+    pub horizon_star: crate::pill::horizon::ShootingStar,
     /// Steps from the person's phone, sent by Oyenza (None until connected).
     pub health: Option<HealthSnapshot>,
     /// The page currently shown when expanded.
@@ -900,6 +902,7 @@ impl AppState {
             app_icons: HashMap::new(),
             ui: PageUiState::default(),
             accent: palette::BLUE,
+            horizon_star: Default::default(),
             health: None,
             page,
             media_paused_at: None,
@@ -1000,9 +1003,9 @@ impl AppState {
         (self.rec.phase == Some(RecPhase::Recording)).then(|| 1.0 - self.rec_elapsed().fract())
     }
 
-    /// The Script reader add-on is on: the Script tab shows.
+    /// The Script reader add-on is removed in this build.
     pub fn script_on(&self) -> bool {
-        self.addon(poni_core::addons::SCRIPT_READER.id) == AddonStatus::Ready
+        false
     }
 
     /// The System add-on is on: the System tab shows.
@@ -1010,27 +1013,24 @@ impl AppState {
         self.addon(poni_core::addons::SYSTEM.id) == AddonStatus::Ready
     }
 
-    /// The Health add-on is on: the Health tab shows and the steps are asked for.
+    /// The Health add-on is removed in this build.
     pub fn health_on(&self) -> bool {
-        self.addon(poni_core::addons::HEALTH.id) == AddonStatus::Ready
+        false
     }
 
-    /// The Stocks add-on is on: the Stocks tab shows (its prices are asked
-    /// for only while the page is on screen).
+    /// The Stocks add-on is removed in this build.
     pub fn stocks_on(&self) -> bool {
-        self.addon(poni_core::addons::STOCKS.id) == AddonStatus::Ready
+        false
     }
 
-    /// The Caffeine add-on is on: the Caffeine tab shows, and the island
-    /// reminds of the day's last call.
+    /// The Caffeine add-on is removed in this build.
     pub fn caffeine_on(&self) -> bool {
-        self.addon(poni_core::addons::CAFFEINE.id) == AddonStatus::Ready
+        false
     }
 
-    /// The Downloader add-on is on, with its tools in place, for an account
-    /// with Studio Pro: the Downloads tab shows.
+    /// The Downloader add-on is removed in this build.
     pub fn downloader_on(&self) -> bool {
-        self.downloader_offered && self.studio_pro() == Some(true) && self.addon(poni_core::addons::DOWNLOADER.id) == AddonStatus::Ready
+        false
     }
 
     /// Notifications is on: its tab shows, and new notifications from the
@@ -1053,10 +1053,9 @@ impl AppState {
         self.addon(poni_core::addons::IELTS.id) == AddonStatus::Ready && self.oyenza.pro != Some(false)
     }
 
-    /// AI usage is on: the AI tab shows and its readers may run. It takes an
-    /// account the server says has Studio Pro.
+    /// AI usage add-on is removed in this build.
     pub fn ai_usage_on(&self) -> bool {
-        self.settings.ai_usage_on(self.studio_pro() == Some(true))
+        false
     }
 
     /// The signed-in account has Studio Pro, as the server last said.
@@ -1067,14 +1066,14 @@ impl AppState {
         }
     }
 
-    /// The Meeting notes add-on is on: the Notes tab shows.
+    /// The Meeting notes add-on is removed in this build.
     pub fn notes_on(&self) -> bool {
-        self.addon(poni_core::addons::MEETING_NOTES.id) == AddonStatus::Ready
+        false
     }
 
-    /// Prayer times is on and its places are read: the tab and reminders run.
+    /// Prayer times is built in and ready once its places are loaded.
     pub fn prayer_on(&self) -> bool {
-        self.addon(poni_core::addons::PRAYER_TIMES.id) == AddonStatus::Ready && self.prayer.places.is_some()
+        self.prayer.places.is_some()
     }
 
     /// The place the times are for, as the engine needs it, with the

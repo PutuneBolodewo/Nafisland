@@ -54,7 +54,8 @@ pub fn check_job(sink: EventSink) -> Job {
 }
 
 fn check(client: &Client) -> Result<Release, String> {
-    let (status, body) = client.get_bytes(update::FEED_URL, TIMEOUT, update::MAX_FILE_BYTES, |_| {}).map_err(|e| e.to_string())?;
+    let url = update::feed_url().ok_or_else(|| "auto-update is disabled in this build".to_string())?;
+    let (status, body) = client.get_bytes(url, TIMEOUT, update::MAX_FILE_BYTES, |_| {}).map_err(|e| e.to_string())?;
     if status != 200 {
         return Err(format!("HTTP {status}"));
     }
@@ -386,9 +387,10 @@ mod tests {
 
     #[test]
     fn a_signed_file_is_believed() {
-        let r = believe(SAMPLE).expect("the sample's signature checks out");
-        assert_eq!((r.version.as_str(), r.headline.as_str()), ("0.2.3", "Sing along from the closed island"));
-        assert_eq!(r.windows.as_ref().map(|d| d.size), Some(2457657));
+        let signed = update::parse_file(SAMPLE).expect("sample parses");
+        assert!(verify(signed.payload.as_bytes(), &signed.signature, &signed.key), "the sample's signature checks out");
+        // The sample payload points to the upstream repo, so our fork's repo check refuses it.
+        assert_eq!(believe(SAMPLE).unwrap_err(), "its notes aren't this repository's release page");
     }
 
     #[test]

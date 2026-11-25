@@ -2224,7 +2224,7 @@ pub fn fetch_phone_page(url: &str) -> (bool, String) {
         Ok(out)
     };
     match fetch() {
-        Ok(resp) if resp.starts_with("HTTP/1.1 200") && resp.contains("<title>Oyenza Studio") && resp.trim_end().ends_with("</html>") => {
+        Ok(resp) if resp.starts_with("HTTP/1.1 200") && resp.contains(&format!("<title>{}", poni_core::brand::APP_NAME)) && resp.trim_end().ends_with("</html>") => {
             (true, format!("served the page at {addr} ({} bytes)", resp.len()))
         }
         Ok(resp) => (false, format!("unexpected answer from {addr}: {}", resp.lines().next().unwrap_or(""))),
@@ -2857,6 +2857,7 @@ impl SelfTest {
             Ok("glass") => Theme::Glass,
             Ok("pill") => Theme::Pill,
             Ok("diorama") => Theme::Diorama,
+            Ok("horizon") => Theme::Horizon,
             _ => Theme::Classic,
         };
         let diorama_run = std::env::var("PONI_SELFTEST_DIORAMA").map(|v| v.trim().to_ascii_lowercase()).unwrap_or_default();
@@ -3670,6 +3671,7 @@ impl SelfTest {
                 Theme::Oyen => crate::oyen::ORANGE,
                 // Diorama's own, as the app keeps it (`theme_accent`).
                 Theme::Diorama => poni_core::look::DIORAMA_ACCENT,
+                Theme::Horizon => crate::pill::horizon::palette(st).accent,
                 _ => palette::BLUE,
             };
         }
