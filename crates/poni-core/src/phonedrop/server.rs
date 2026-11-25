@@ -332,7 +332,8 @@ const PAGE_CSP: &str = "Content-Security-Policy: default-src 'none'; script-src 
 
 fn serve_page(shared: &Shared, w: &mut TcpStream, from: &str) -> io::Result<()> {
     (shared.sink)(Event::Visit { from: from.to_string() });
-    http::respond(w, 200, "text/html; charset=utf-8", PAGE_HTML.as_bytes(), PAGE_CSP)
+    let html = PAGE_HTML.replace("{{APP_NAME}}", crate::brand::APP_NAME);
+    http::respond(w, 200, "text/html; charset=utf-8", html.as_bytes(), PAGE_CSP)
 }
 
 /// Files the phone can save right now: (index, path, name, size).

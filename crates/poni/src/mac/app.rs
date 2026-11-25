@@ -539,6 +539,8 @@ pub struct App {
     updater: Option<crate::updates::Updater>,
     /// Prayer times' adzan, while it plays.
     adzan: services::adzan::AdzanPlayer,
+    /// Caffeine's reminder before last call: its minute and the day it showed.
+    last_call: crate::last_call::Reminder,
     motion: Option<MotionStats>,
     motion_name: &'static str,
     motions_logged: u32,
@@ -569,6 +571,8 @@ pub struct App {
     /// what stopping it gave.
     smoke_notes: Option<Result<(services::notes::Recording, bool, bool), poni_core::notes::CaptureIssue>>,
     smoke_notes_stop: Option<(bool, String)>,
+    /// The Caffeine steps: the drinks in the log before the one they add.
+    smoke_drinks: Option<usize>,
     /// The island floated on the last frame (Pill letting go of the notch).
     was_floating: bool,
     /// The port Oyenza Studio Recorder writes to (`services::recorder`).
@@ -694,6 +698,7 @@ impl App {
             usage_watch: services::usage::Watch::default(),
             updater: None,
             adzan: Default::default(),
+            last_call: Default::default(),
             motion: None,
             motion_name: "morph",
             motions_logged: 0,
@@ -711,6 +716,7 @@ impl App {
             smoke_mic_stop: None,
             smoke_notes: None,
             smoke_notes_stop: None,
+            smoke_drinks: None,
             was_floating: false,
             rec_port: None,
             rec_alive_at: 0.0,
@@ -883,6 +889,9 @@ impl App {
                 } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(activities::PRAYER_OK_ID)) {
                     // So does the prayer countdown under a pointer resting on
                     // its OK (resting on the rest of it still opens).
+                } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(pill::diorama::BALL_ID)) {
+                    // And Diorama's resting pill under a pointer resting on its
+                    // glass ball, which is there to be slid.
                 } else {
                     self.expand();
                 }
@@ -952,6 +961,11 @@ impl App {
         if let Some(t) = activities::next_wake(&self.mode, &self.st) {
             consider(t);
         }
+        // Caffeine's reminder comes on its minute, the island asleep or not
+        // (one wake a day at most).
+        if let Some(t) = self.last_call.wake(&self.st) {
+            consider(t);
+        }
         if let Mode::Expanded(p) = self.mode {
             // A page's own changes rest while nobody can see the screen (the
             // Prayer page's countdown ticks every second).
@@ -1000,12 +1014,14 @@ impl App {
         }
         if before.theme != self.st.settings.theme {
             self.st.accent = theme_accent(self.st.settings.theme);
+            // The menu ticks the theme and lists its idle looks (the status
+            // bar is Pill's alone, not Diorama's). Around a notch only Pill's
+            // island moves along the top edge (Move island to the centre).
+            self.refresh_menu();
         }
         // The Pill theme's window keeps room for the gap above the island.
-        // Around a notch only Pill moves along the top edge (Move island to the centre).
         if pill::on(before.theme) != pill::on(self.st.settings.theme) {
             self.layout_surface();
-            self.refresh_menu();
         }
         // Hide or Stay on top of full-screen apps (Settings or the menu bar).
         if before.hide_in_fullscreen != self.st.settings.hide_in_fullscreen {
@@ -1974,7 +1990,7 @@ impl App {
         if self.st.settings.prayer.follow_location && self.st.prayer.located_at.is_none_or(|t| self.st.unix - t >= 3 * 3600) {
             self.locate();
         }
-        let Some(site) = self.st.prayer.site() else { return };
+        let Some(site) = self.st.prayer_site() else { return };
         let now = self.st.prayer_now();
         let Some(from) = self.st.prayer.handled_until else {
             self.st.prayer.handled_until = Some(now);
@@ -1996,7 +2012,7 @@ impl App {
     /// A prayer's time came: the island says so and plays the chosen sound.
     /// Quiet when it's late (after a sleep) or a full-screen app hides the island.
     fn prayer_moment(&mut self, m: PrayerMoment, ring: bool) {
-        let Some(site) = self.st.prayer.site() else { return };
+        let Some(site) = self.st.prayer_site() else { return };
         let place = self.st.prayer.place.as_ref().map_or(String::new(), |p| p.label.clone());
         let ring = ring && !self.fullscreen_hidden;
         let sound = if ring { self.st.settings.prayer.sound } else { PrayerSound::Silent };
@@ -2048,7 +2064,7 @@ impl App {
     /// countdown.
     fn prayer_countdown_ok(&mut self) {
         self.refresh_time();
-        if let (Some(m), Some(site)) = (self.st.prayer_countdown_ok(), self.st.prayer.site()) {
+        if let (Some(m), Some(site)) = (self.st.prayer_countdown_ok(), self.st.prayer_site()) {
             pinfo!("prayer: countdown put away until {} at {}", m.prayer.name(), site.hhmm(m.at));
         }
     }
@@ -2184,7 +2200,8 @@ impl App {
     /// middle), or at the spot it was dragged to, moved in just enough to
     /// keep its outline (as wide as it is now) in the window: opening near
     /// the screen's edge, it grows away from the edge. Pill around a notch
-    /// docks at the notch to rest and slides to the spot as it floats.
+    /// docks at the notch to rest and slides to the spot as it floats;
+    /// Diorama's picture rests floating, so it stays at the spot.
     fn place_island(&mut self) {
         let Some(at) = self.laid_spot else {
             self.cx = self.notch_cx;
@@ -2268,12 +2285,10 @@ impl App {
     }
 
     /// How the island paints: the theme's look, or around a notch the one
-    /// that meets its black (Oyen goes black there).
+    /// that meets its black (Oyen goes black there); Diorama's by day or at
+    /// night, as its picture shows (it floats below a notch).
     fn look(&self) -> &'static Look {
-        match self.screen.notch {
-            Some(_) => poni_core::look::around_notch(self.st.settings.theme),
-            None => poni_core::look::of(self.st.settings.theme),
-        }
+        pill::look(&self.st, self.screen.notch.is_some())
     }
 
     /// The resting island is out of sight: hidden until hover, or inside the notch.
@@ -2358,6 +2373,12 @@ impl App {
             self.drag_island(p);
             return;
         }
+        if pill::diorama::slide(p.x, clock::mono()) {
+            // Diorama's glass ball in hand follows the pointer.
+            self.input.mouse = Some(p);
+            self.request_frame();
+            return;
+        }
         self.peek_at(p);
         let inside = self.hovering_inside(p) || self.input.down;
         if !inside {
@@ -2391,7 +2412,8 @@ impl App {
     /// move here, so the eyes cost a redraw only when their side or where
     /// they look changes.
     fn peek_at(&mut self, p: Point) {
-        let Some(n) = self.screen.notch.filter(|_| self.st.settings.idle_style == IdleStyle::Eyes) else { return };
+        // (Not in Diorama, which rests as its picture and has no eyes.)
+        let Some(n) = self.screen.notch.filter(|_| self.st.settings.idle_style == IdleStyle::Eyes && !pill::diorama::shows(&self.st)) else { return };
         let now = clock::mono().max(self.st.now);
         let before = notch::peek_key(&self.st, n, now);
         self.st.ui.peek.point(Point::new(p.x - self.notch_cx, p.y), now, n.w / 2.0);
@@ -2450,6 +2472,13 @@ impl App {
                         // The prayer countdown's OK, the same way.
                         self.input.pressed_id = None;
                         self.prayer_countdown_ok();
+                    } else if self.input.pressed_id == Some(wid(pill::diorama::BALL_ID)) {
+                        // Diorama's glass ball: in hand until the button comes
+                        // up, sliding with the pointer; the island neither
+                        // opens nor moves.
+                        self.input.pressed_id = None;
+                        pill::diorama::grab(&self.st, p.x);
+                        self.cancel_hover();
                     } else if self.movable() && (self.screen.notch.is_none() || self.island.floating()) {
                         // Opens when the button comes up (`open_from_press`),
                         // unless the pointer moves sideways first: then it
@@ -2469,6 +2498,11 @@ impl App {
                 // A drop puts the window back around the island: the point
                 // came in the coordinates of the window as it was.
                 let left = self.win.0;
+                if pill::diorama::let_go(&self.st, clock::mono()) {
+                    // The ball rolls on to its end; the island stays closed under the pointer.
+                    self.input.pressed_id = None;
+                    self.cancel_hover();
+                }
                 if let Some(g) = self.grab.take() {
                     // What the closed island showed under the press doesn't click.
                     self.input.pressed_id = None;
@@ -2764,6 +2798,7 @@ impl App {
     fn set_page(&mut self, p: PageKind) {
         if p != self.st.page {
             self.st.page = p;
+            self.st.ui.addon_about = None;
             // Settings is never where the island opens next time.
             if p != PageKind::Settings {
                 self.st.update.sheet = false;
@@ -2994,7 +3029,8 @@ impl App {
         // resting or not, so they go on once someone is back
         // (services::keychain). Told before the worker; nothing while it
         // stays the same.
-        services::keychain::set_watch(open, self.st.settings.usage.notices);
+        let notices = self.st.settings.usage.notices && self.st.ai_usage_on();
+        services::keychain::set_watch(open, notices);
         // The smoke run shows made-up readings (and checks the keychain on
         // its own): nothing is read, even from inside a step.
         if self.smoke_run {
@@ -3002,7 +3038,7 @@ impl App {
         }
         let w = services::usage::Watch {
             open,
-            notices: here && self.st.settings.usage.notices && !self.st.power.saver,
+            notices: here && notices && !self.st.power.saver,
             near_pct: self.st.settings.usage.near_pct,
             use_24h: self.st.settings.use_24h,
             hidden: services::usage::picked(&self.st.settings.usage.hidden),
@@ -3133,7 +3169,7 @@ impl App {
         }
     }
 
-    /// The IELTS, Notes or Add-ons page came on screen: whether the account has
+    /// The IELTS, Notes, Add-ons or AI page came on screen: whether the account has
     /// Studio Pro, now (unless just asked). Never signed in: nothing starts.
     fn set_pro_shown(&mut self, on: bool) {
         if on != self.pro_shown {
@@ -3580,20 +3616,28 @@ impl App {
         }
         self.script_held = held;
         self.prayer_tick();
+        // Caffeine's reminder before last call waits for the island the same
+        // way, behind a prayer's notice, which doesn't wait.
+        let here = !(self.away.0 || self.away.1) && !self.expanded && !self.fullscreen_hidden;
+        if self.last_call.tick(&mut self.st, here) {
+            self.request_frame();
+        }
         self.ielts_tick();
         self.notes_tick();
         self.check_recorder_alive(false);
-        // Prayer times, System, Health, Stocks, Screen recorder, IELTS or
-        // Downloader switched off: its tab is gone.
+        // Prayer times, System, Health, Stocks, Screen recorder, AI usage, IELTS
+        // or Downloader switched off: its tab is gone.
         let gone = match self.st.page {
             PageKind::Prayer => !self.st.prayer_on(),
             PageKind::System => !self.st.system_on(),
             PageKind::Health => !self.st.health_on(),
             PageKind::Stocks => !self.st.stocks_on(),
+            PageKind::Caffeine => !self.st.caffeine_on(),
             PageKind::Record => !self.st.record_on(),
             PageKind::Ielts => !self.st.ielts_on(),
             PageKind::Downloads => !self.st.downloader_on(),
             PageKind::Notes => !self.st.notes_on(),
+            PageKind::Ai => !self.st.ai_usage_on(),
             _ => false,
         };
         if gone {
@@ -3658,7 +3702,7 @@ impl App {
         self.set_oyenza_watch(self.mode == Mode::Expanded(PageKind::Oyenza));
         self.set_today_watch(self.mode == Mode::Expanded(PageKind::Today));
         self.set_health_shown(self.mode == Mode::Expanded(PageKind::Health));
-        self.set_pro_shown(matches!(self.mode, Mode::Expanded(PageKind::Ielts | PageKind::Notes | PageKind::Addons)));
+        self.set_pro_shown(matches!(self.mode, Mode::Expanded(PageKind::Ielts | PageKind::Notes | PageKind::Addons | PageKind::Ai)));
         self.set_stocks_watch();
         self.set_usage_watch();
         // The Pill theme floats the island below the top edge (below the menu
@@ -3933,7 +3977,7 @@ impl App {
                     "ja-auto" => 25.0,
                     "ja-get" => 75.0,
                     "ja-off" | "prayer-off" => 15.0,
-                    // Prayer times downloads 1.9 MB; Ashar comes 2 seconds in;
+                    // Prayer times downloads about 1 MB; Ashar comes 2 seconds in;
                     // macOS answers where the Mac is (or asks the person).
                     "prayer-get" => 75.0,
                     "prayer-adzan" | "prayer-locate" => 10.0,
@@ -4155,7 +4199,7 @@ impl App {
             // OK (what a click on it does). The next step's adzan still comes.
             "prayer-ok" => {
                 let unix = clock::unix_now();
-                if let Some(ashar) = self.st.prayer.site().and_then(|s| poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| t.ashar)) {
+                if let Some(ashar) = self.st.prayer_site().and_then(|s| poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| t.ashar)) {
                     self.st.prayer.clock_shift = ashar - 5 * 60 - unix;
                     self.st.prayer.handled_until = Some(ashar - 5 * 60);
                 }
@@ -4166,7 +4210,7 @@ impl App {
                 self.st.settings.prayer.sound = PrayerSound::Adzan;
                 self.st.cmds.push(Command::SaveSettings);
                 let unix = clock::unix_now();
-                if let Some((site, ashar)) = self.st.prayer.site().and_then(|s| poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| (s, t.ashar))) {
+                if let Some((site, ashar)) = self.st.prayer_site().and_then(|s| poni_core::prayer::day_times(&s, s.local_day(unix)).map(|t| (s, t.ashar))) {
                     self.st.prayer.clock_shift = ashar - 2 - unix;
                     self.st.prayer.handled_until = Some(ashar - 2);
                     pinfo!("smoke: Ashar in {} is {}", site.hhmm(ashar), self.st.prayer.place.as_ref().map_or("", |p| p.label.as_str()));
@@ -4185,6 +4229,30 @@ impl App {
             }
             "prayer-off" => {
                 self.st.settings.set_addon(PRAYER_TIMES.id, false);
+                self.st.cmds.push(Command::SaveSettings);
+            }
+            // Caffeine from the Add-ons tab (built in: nothing downloads),
+            // then its tab, a drink in its log and off again. The drink is a
+            // 2-shot Americano at the minute the Mac's clock shows; data.json
+            // saves it.
+            "caffeine-on" => {
+                self.st.settings.set_addon(poni_core::addons::CAFFEINE.id, true);
+                self.st.cmds.push(Command::SaveSettings);
+            }
+            "caffeine-page" => {
+                self.set_page(PageKind::Caffeine);
+                self.expand();
+            }
+            "caffeine-add" => {
+                use poni_core::caffeine::{local_minute, Bean, Drink, Kind};
+                self.smoke_drinks = Some(self.st.store.caffeine.drinks.len());
+                let (kind, amount, bean) = (Kind::Americano, 2, Bean::Arabica);
+                let at = local_minute(&clock::local_now());
+                self.st.store.caffeine.add(Drink { id: 0, at, kind, amount, bean: Some(bean), mg: kind.mg(amount, bean), name: String::new() });
+                self.st.cmds.push(Command::SaveStore);
+            }
+            "caffeine-off" => {
+                self.st.settings.set_addon(poni_core::addons::CAFFEINE.id, false);
                 self.st.cmds.push(Command::SaveSettings);
             }
             // A plain window goes full screen in a Space of its own (a second
@@ -4264,6 +4332,10 @@ impl App {
             // of this Mac is read), then its keychain reader on test items.
             "ai-page" => {
                 self.st.notice = None;
+                // AI usage is part of Studio Pro: signed in with it for the AI
+                // steps ("ai-secret" ends them).
+                self.st.oyenza.link = OyenzaLink::Connected { account: "a\u{2022}\u{2022}\u{2022}@example.com".into() };
+                self.st.oyenza.pro = Some(true);
                 let now = self.st.now;
                 pages::usage::picture(&mut self.st, pages::usage::Picture::Plans, now);
                 self.set_page(PageKind::Ai);
@@ -4286,6 +4358,8 @@ impl App {
                 self.set_page(PageKind::Ai);
                 self.expand();
             }
+            // The last AI step: signed out again for the ones after it.
+            "ai-secret" => self.st.oyenza = Default::default(),
             // macOS's own now playing, as a browser tab reaches it: the
             // stream stops, tools/mac-smoke.sh starts the MediaRemote
             // adapter's test player, and sound (CI's Macs play none) starts
@@ -4355,6 +4429,34 @@ impl App {
                     let p = Point::new(self.cx - n.w / 2.0 - 260.0, 140.0);
                     self.smoke_point = Some(p);
                     self.on_pointer(p);
+                }
+            }
+            // Diorama around the notch, on the clock look again: its resting
+            // pill is its picture, so where Pill's hides inside the notch it
+            // floats below the menu bar. The glass ball rolls in as the theme
+            // is picked (smoke_ready waits for it); ja-notify goes back to
+            // Classic.
+            "notch-diorama" => {
+                self.st.settings.idle_style = IdleStyle::Clock;
+                self.on_menu(MenuCmd::SetTheme(Theme::Diorama));
+            }
+            // Its glass ball slid by hand to the other end, through the
+            // view's own mouse events: pressed, carried along in three moves
+            // and let go there. Then tapped, back where the sun has it.
+            "notch-diorama-slide" => {
+                if let (Some(p), Some(rest)) = (self.smoke_ball(), pill::diorama::geom(&self.st)) {
+                    let way = if pill::diorama::night(&self.st) { -1.0 } else { 1.0 } * (rest.w - rest.h);
+                    let _ = self.on_view_input(ViewInput::Down { x: p.x, y: p.y, double: false });
+                    for f in [0.3, 0.7, 1.0] {
+                        self.on_pointer(Point::new(p.x + f * way, p.y));
+                    }
+                    let _ = self.on_view_input(ViewInput::Up { x: p.x + way, y: p.y });
+                }
+            }
+            "notch-diorama-tap" => {
+                if let Some(p) = self.smoke_ball() {
+                    let _ = self.on_view_input(ViewInput::Down { x: p.x, y: p.y, double: false });
+                    let _ = self.on_view_input(ViewInput::Up { x: p.x, y: p.y });
                 }
             }
             // Pill floats below the top edge, open and resting; around the
@@ -4507,11 +4609,23 @@ impl App {
             },
             // The eyes are out on the camera's other side.
             "notch-eyes" => !self.st.ui.peek.along(clock::mono()).1 || waited > 3.0,
+            // The glass ball has rolled into place: a second and a half from
+            // the theme's first frame.
+            "notch-diorama" => waited > 2.5,
+            // On to its end (at most 0.6 s), and a tap's roll back (1.1 s).
+            "notch-diorama-slide" | "notch-diorama-tap" => waited > 1.6,
             // The countdown ticks at least once.
             "prayer-page" => waited > 1.5,
             "prayer-adzan" => self.st.prayer.adzan || waited > 6.0,
             "prayer-locate" => self.st.prayer.locate != Locate::Asking || waited > 6.0,
             "prayer-off" => (self.st.addon(PRAYER_TIMES.id) == AddonStatus::Off && !prayer_folder().exists() && self.addons.is_none()) || waited > 10.0,
+            // Built in, Caffeine is on as soon as it's switched on; off, its
+            // tab goes and the island moves to Add-ons.
+            "caffeine-on" => self.st.caffeine_on() || waited > 3.0,
+            "caffeine-page" => (self.expanded && self.st.page == PageKind::Caffeine && waited > 0.6) || waited > 4.0,
+            // data.json is saved 800 ms after a change (`Command::SaveStore`).
+            "caffeine-add" => waited > 1.2,
+            "caffeine-off" => (!self.st.caffeine_on() && self.st.page != PageKind::Caffeine) || waited > 4.0,
             "headphones" => self.smoke_devices.as_ref().is_some_and(|(before, _)| services::audio::list_changes() > *before) || waited > 4.0,
             "fullscreen-hide" => self.fullscreen_hidden || waited > 12.0,
             "fullscreen-stay" => (!self.fullscreen_hidden && window::is_shown() && waited > 1.0) || waited > 6.0,
@@ -4538,12 +4652,15 @@ impl App {
         }
     }
 
-    /// The Pill theme on the real window: where the island sits, and which
-    /// points take the mouse. Without a notch it floats `TOP_GAP` below the
-    /// top edge and the gap above it takes the mouse; around a notch it rests
-    /// inside the notch (the eyes peek out beside it) and the music pill and
-    /// the open card float below it, where the gap and the notch take the
-    /// mouse and the menu bar beside the notch doesn't.
+    /// Where Diorama's glass ball is on the resting pill, window DIPs: the
+    /// house end by day, the tree end at night.
+    fn smoke_ball(&self) -> Option<Point> {
+        let rest = pill::diorama::geom(&self.st)?;
+        let body = self.island.body_rect_at(self.cx);
+        let lens = if pill::diorama::night(&self.st) { 1.0 } else { 0.0 };
+        Some(Point::new(body.x + (body.w - rest.w) / 2.0 + rest.h / 2.0 + lens * (rest.w - rest.h), body.center().y))
+    }
+
     /// A press on the closed island, a move `dx` DIPs sideways and the
     /// release there, as the view's mouse events bring them: in window DIPs,
     /// each placed for the window as it is (it spans the screen once the
@@ -4558,9 +4675,45 @@ impl App {
         let _ = self.on_view_input(ViewInput::Up { x: from + dx - self.win.0, y: p.y });
     }
 
+    /// Page `p` drawn alone offscreen as the window draws it (in this look,
+    /// at the window's scale), on the island's ground: how many of its pixels
+    /// stand clearly apart from that ground, as the Windows self-test counts
+    /// content pixels. An empty page has none.
+    fn smoke_page_pixels(&mut self, p: PageKind) -> usize {
+        let scale = self.gfx.scale();
+        let area = Rect::new(0.0, 0.0, self.st.settings.expanded_width - 2.0 * pages::PAD, pages::content_height(p, &self.st));
+        let Some(bmp) = crate::gfx::Bitmap::new((area.w * scale).ceil() as usize, (area.h * scale).ceil() as usize, scale) else { return 0 };
+        let look = self.look();
+        self.gfx.set_look(look);
+        {
+            let mut c = self.gfx.canvas(bmp.ctx());
+            c.fill_rect(area, palette::ISLAND);
+            let (mut input, mut hits) = (Input::default(), Vec::new());
+            let now = self.st.now;
+            let mut ui = Ui::new(&mut c, &mut input, &mut hits, now);
+            pages::draw_page(&mut ui, &mut self.st, area, p);
+        }
+        // Premultiplied BGRA, opaque on the ground.
+        let ground = [look.ground.b, look.ground.g, look.ground.r].map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        bmp.pixels().as_chunks::<4>().0.iter().filter(|px| px[3] >= 200 && px[..3].iter().zip(ground).any(|(&a, b)| a.abs_diff(b) >= 140)).count()
+    }
+
+    /// The Pill theme on the real window: where the island sits, and which
+    /// points take the mouse. Without a notch it floats `TOP_GAP` below the
+    /// top edge and the gap above it takes the mouse; around a notch it rests
+    /// inside the notch (the eyes peek out beside it) and the music pill and
+    /// the open card float below it, where the gap and the notch take the
+    /// mouse and the menu bar beside the notch doesn't. Diorama's resting
+    /// picture floats there too.
     fn pill_report(&self) -> (&'static str, bool, String) {
         let body = self.island.body_rect_at(self.cx);
-        let look = *self.look() == poni_core::look::PILL && !glass::shown();
+        // Pill's own look, or Diorama's of the side of the day its ball rests on.
+        let want = match self.st.settings.theme {
+            Theme::Diorama => poni_core::look::diorama(pill::diorama::night(&self.st)),
+            _ => &poni_core::look::PILL,
+        };
+        let look = self.look() == want && !glass::shown();
+        let look_name = if self.st.settings.theme == Theme::Diorama { "Diorama's look" } else { "Pill's look" };
         let at = |x: f32, y: f32| self.hovering_inside(Point::new(x, y));
         let (ok, place) = match self.screen.notch {
             None => {
@@ -4595,12 +4748,13 @@ impl App {
         (
             "pill-theme",
             ok && look,
-            format!("{:?}, {:.0}x{:.0} DIP r {:.0}, {place}; Pill's look: {look}", self.mode, g.w, g.h, g.r),
+            format!("{:?}, {:.0}x{:.0} DIP r {:.0}, {place}; {look_name}: {look}", self.mode, g.w, g.h, g.r),
         )
     }
 
-    /// What each new part of the app did on a real Mac.
-    fn smoke_check(&self, name: &str) -> Option<(&'static str, bool, String)> {
+    /// What each new part of the app did on a real Mac (mutable: a page is
+    /// drawn offscreen for some).
+    fn smoke_check(&mut self, name: &str) -> Option<(&'static str, bool, String)> {
         let gib = |b: u64| b as f64 / (1u64 << 30) as f64;
         match name {
             "settings-window" => {
@@ -4735,6 +4889,30 @@ impl App {
                     notch::peek_key(&self.st, n, clock::mono()).1
                 );
                 Some(("eyes-around-notch", ok, d))
+            }
+            // Diorama's resting pill: floating as Pill's music pill does, at
+            // its picture's size.
+            "notch-diorama" => {
+                let (_, placed, d) = self.pill_report();
+                let g = self.island.current();
+                let sized = pill::diorama::geom(&self.st).is_some_and(|p| (g.w, g.h) == (p.w, p.h));
+                let ok = placed && self.mode == Mode::Idle && sized;
+                Some(("diorama-rests-floating", ok, format!("{d}; its picture's size: {sized}")))
+            }
+            // Slid to the far end, the ball stays there against the sun and
+            // the theme with it; tapped, it follows the sun again. Neither
+            // opens or moves the island.
+            "notch-diorama-slide" | "notch-diorama-tap" => {
+                let slid = name == "notch-diorama-slide";
+                let left = pill::diorama::left_by_hand(&self.st);
+                let (_, placed, d) = self.pill_report();
+                let ok = left.is_some() == slid && !pill::diorama::held() && !self.expanded && self.mode == Mode::Idle && placed;
+                let side = match left {
+                    Some(true) => "left on the tree: the theme keeps the night",
+                    Some(false) => "left on the house: the theme keeps the day",
+                    None => "where the sun has it",
+                };
+                Some((if slid { "diorama-slid-by-hand" } else { "diorama-tapped-back" }, ok, format!("the ball is {side}; the island is {}; {d}", if self.expanded { "open" } else { "closed" })))
             }
             "music-cost" | "pill-music-cost" => {
                 let c = self.cost;
@@ -4887,12 +5065,12 @@ impl App {
             "prayer-page" => {
                 let tabs = pages::tabs(&self.st);
                 let now = self.st.prayer_now();
-                let next = self.st.prayer.site().and_then(|s| poni_core::prayer::next_prayer(&s, now).map(|m| format!("{} at {}", m.prayer.name(), s.hhmm(m.at))));
+                let next = self.st.prayer_site().and_then(|s| poni_core::prayer::next_prayer(&s, now).map(|m| format!("{} at {}", m.prayer.name(), s.hhmm(m.at))));
                 let ok = self.st.page == PageKind::Prayer && tabs.contains(&PageKind::Prayer) && next.is_some();
                 Some(("prayer-page", ok, format!("{} tabs; next: {}", tabs.len(), next.unwrap_or_else(|| "none".into()))))
             }
             "prayer-ok" => {
-                let running = self.st.prayer.site().and_then(|s| poni_core::prayer::countdown(&s, self.st.prayer_now(), self.st.settings.prayer.remind_before_min));
+                let running = self.st.prayer_site().and_then(|s| poni_core::prayer::countdown(&s, self.st.prayer_now(), self.st.settings.prayer.remind_before_min));
                 let shown = activities::prayer_countdown(&self.st);
                 let ok = running.is_some() && shown.is_none() && self.st.prayer.countdown_ok == running.map(|(m, _)| m.at);
                 Some(("prayer-ok", ok, format!("countdown {:?}, on the island: {shown:?}", running.map(|(m, left)| (m.prayer, left)))))
@@ -4918,6 +5096,53 @@ impl App {
                 let tab = pages::tabs(&self.st).contains(&PageKind::Prayer);
                 let ok = status == AddonStatus::Off && gone && self.st.prayer.places.is_none() && !tab && self.addons.is_none();
                 Some(("prayer-off", ok, format!("{status:?}; files {}; Prayer tab: {tab}", if gone { "deleted" } else { "still there" })))
+            }
+            // Built in, so switching it on starts nothing: no download, and
+            // the add-ons' downloader (stopped with Prayer times) stays so.
+            "caffeine-on" => {
+                let addon = &poni_core::addons::CAFFEINE;
+                let status = self.st.addon(addon.id);
+                let tab = pages::tabs(&self.st).contains(&PageKind::Caffeine);
+                let ok = status == AddonStatus::Ready && tab && self.addons.is_none();
+                let downloader = if self.addons.is_none() { "not started" } else { "running" };
+                Some(("caffeine-addon", ok, format!("{}; Caffeine tab: {tab}; add-ons' downloader {downloader}", status.line(addon, true))))
+            }
+            // Open at the page's size, and the page drew: drawn alone
+            // offscreen, an empty page has no content pixels.
+            "caffeine-page" => {
+                let lit = self.smoke_page_pixels(PageKind::Caffeine);
+                let (g, want) = (self.island.current(), self.geom_for(&Mode::Expanded(PageKind::Caffeine)));
+                let tabs = pages::tabs(&self.st);
+                let sized = (g.w - want.w).abs() < 0.5 && (g.h - want.h).abs() < 0.5;
+                let ok = self.mode == Mode::Expanded(PageKind::Caffeine) && tabs.contains(&PageKind::Caffeine) && sized && lit >= 20;
+                let d = format!("{:?} at {:.0}x{:.0} DIP (the page's {:.0}x{:.0}), {} tabs; {lit} content pixels in the page drawn alone", self.mode, g.w, g.h, want.w, want.h, tabs.len());
+                Some(("caffeine-page", ok, d))
+            }
+            // The drink is in the log and today's count, data.json (saved a
+            // moment later) holds the same log, and the page draws it.
+            "caffeine-add" => {
+                use poni_core::caffeine::{local_minute, Today};
+                let lit = self.smoke_page_pixels(PageKind::Caffeine);
+                let before = self.smoke_drinks.unwrap_or(0);
+                let log = &self.st.store.caffeine;
+                let today = Today::of(log, &self.st.settings.caffeine, local_minute(&clock::local_now()));
+                let (saved, _): (Store, _) = load_json(&paths::store_path());
+                let kept = saved.caffeine == *log;
+                let ok = log.drinks.len() == before + 1 && today.count >= 1 && kept && lit >= 20;
+                let d = format!(
+                    "{before} -> {} drinks in the log; today {} drinks, {:.0} mg; data.json holds them: {kept}; {lit} content pixels in the page drawn alone",
+                    log.drinks.len(),
+                    today.count,
+                    today.total_mg
+                );
+                Some(("caffeine-drink", ok, d))
+            }
+            "caffeine-off" => {
+                let status = self.st.addon(poni_core::addons::CAFFEINE.id);
+                let tab = pages::tabs(&self.st).contains(&PageKind::Caffeine);
+                let ok = status == AddonStatus::Off && !tab && self.st.page != PageKind::Caffeine && self.mode != Mode::Expanded(PageKind::Caffeine);
+                let d = format!("{status:?}; Caffeine tab: {tab}; {:?}; {} drinks in the log", self.mode, self.st.store.caffeine.drinks.len());
+                Some(("caffeine-off", ok, d))
             }
             "fullscreen-hide" => {
                 let ok = self.front_full_screen && self.fullscreen_hidden && !window::is_shown();
@@ -5400,6 +5625,9 @@ fn system_report(st: &AppState) -> (bool, String) {
 pub(crate) fn theme_accent(theme: Theme) -> Color {
     if oyen::on(theme) {
         oyen::ORANGE
+    } else if theme == Theme::Diorama {
+        // Its own, which its day and night looks paint as theirs.
+        poni_core::look::DIORAMA_ACCENT
     } else {
         services::system_accent().unwrap_or(palette::BLUE)
     }
@@ -5479,7 +5707,7 @@ pub fn draw_content(
 
 // ---------------------------------------------------------------- smoke test bookkeeping
 
-const SMOKE_STEPS: [&str; 83] = [
+const SMOKE_STEPS: [&str; 90] = [
     "idle",
     "hover",
     "open-focus",
@@ -5520,6 +5748,9 @@ const SMOKE_STEPS: [&str; 83] = [
     "notch-pill-centre",
     "notch-pill-ear",
     "notch-eyes",
+    "notch-diorama",
+    "notch-diorama-slide",
+    "notch-diorama-tap",
     "ja-notify",
     "ja-auto",
     "ja-get",
@@ -5532,6 +5763,10 @@ const SMOKE_STEPS: [&str; 83] = [
     "prayer-stop",
     "prayer-locate",
     "prayer-off",
+    "caffeine-on",
+    "caffeine-page",
+    "caffeine-add",
+    "caffeine-off",
     "fullscreen-hide",
     "fullscreen-stay",
     "fullscreen-back",

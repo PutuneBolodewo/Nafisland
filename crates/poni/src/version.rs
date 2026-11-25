@@ -1,7 +1,7 @@
 //! Which build this is, for the menu's About line and the tray tooltip:
 //! the version, plus where the build came from (build.rs fills these in).
 
-const REPO: &str = "https://github.com/lucacadalora/oyenza-studio";
+const REPO: &str = poni_core::brand::REPO_URL;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// "release" (a release tag's CI build), "test" (any other CI build) or "local".
 const KIND: &str = env!("PONI_BUILD_KIND");
@@ -27,7 +27,8 @@ fn label(version: &str, kind: &str, commit: &str, day: &str) -> String {
         "test" => format!("test build {commit}, {day}"),
         _ => "local build".to_string(),
     };
-    if detail.is_empty() { format!("About Oyenza Studio {version}") } else { format!("About Oyenza Studio {version} ({detail})") }
+    let app = poni_core::brand::APP_NAME;
+    if detail.is_empty() { format!("About {app} {version}") } else { format!("About {app} {version} ({detail})") }
 }
 
 fn url(version: &str, kind: &str, commit: &str) -> String {
@@ -44,16 +45,17 @@ mod tests {
 
     #[test]
     fn the_about_line_says_which_build_this_is() {
-        assert_eq!(label("0.2.3", "release", "c7d77c8", "25 Oct 2026"), "About Oyenza Studio 0.2.3 (25 Oct 2026)");
-        assert_eq!(label("0.2.3", "test", "c7d77c8", "25 Oct 2026"), "About Oyenza Studio 0.2.3 (test build c7d77c8, 25 Oct 2026)");
-        assert_eq!(label("0.2.3", "local", "", ""), "About Oyenza Studio 0.2.3 (local build)");
-        assert!(about_label().starts_with(&format!("About Oyenza Studio {VERSION}")));
+        let app = poni_core::brand::APP_NAME;
+        assert_eq!(label("0.2.3", "release", "c7d77c8", "25 Oct 2026"), format!("About {app} 0.2.3 (25 Oct 2026)"));
+        assert_eq!(label("0.2.3", "test", "c7d77c8", "25 Oct 2026"), format!("About {app} 0.2.3 (test build c7d77c8, 25 Oct 2026)"));
+        assert_eq!(label("0.2.3", "local", "", ""), format!("About {app} 0.2.3 (local build)"));
+        assert!(about_label().starts_with(&format!("About {app} {VERSION}")));
     }
 
     #[test]
     fn a_release_opens_its_notes_and_a_test_build_its_commit() {
-        assert_eq!(url("0.2.3", "release", "c7d77c8"), "https://github.com/lucacadalora/oyenza-studio/releases/tag/v0.2.3");
-        assert_eq!(url("0.2.3", "test", "c7d77c8"), "https://github.com/lucacadalora/oyenza-studio/commit/c7d77c8");
-        assert_eq!(url("0.2.3", "local", ""), "https://github.com/lucacadalora/oyenza-studio/releases");
+        assert_eq!(url("0.2.3", "release", "c7d77c8"), format!("{REPO}/releases/tag/v0.2.3"));
+        assert_eq!(url("0.2.3", "test", "c7d77c8"), format!("{REPO}/commit/c7d77c8"));
+        assert_eq!(url("0.2.3", "local", ""), format!("{REPO}/releases"));
     }
 }

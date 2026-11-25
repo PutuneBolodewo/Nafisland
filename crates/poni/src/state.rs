@@ -139,7 +139,7 @@ pub enum NoticeAction {
     /// Open the Update sheet in Settings (a new version's notice).
     OpenUpdate,
     /// Open the app another app's notification came from (its
-    /// AppUserModelID; the Notifications add-on). The island stays closed.
+    /// AppUserModelID; Notifications). The island stays closed.
     OpenApp(String),
 }
 
@@ -364,6 +364,9 @@ pub struct PageUiState {
     pub peek: poni_core::peek::Peek,
     /// The Stocks page: its scroll, search, edit mode and chart animation.
     pub stocks: crate::pages::stocks::StocksUi,
+    /// The Caffeine page: the drink picked, a drag, the list's scroll, Add
+    /// a drink while it's open, and the chart kept with its painted dots.
+    pub caffeine: crate::pages::caffeine::CaffeineUi,
     /// The Downloads page: its link field, mode and scroll.
     pub downloads: crate::pages::downloads::DownloadsUi,
     /// The AI tab's own state while it shows (`pages::usage`).
@@ -374,6 +377,8 @@ pub struct PageUiState {
     pub notes_saved_at: f64,
     pub notes_note: Option<(String, f64)>,
     pub notes_kept: bool,
+    /// The Pro add-on whose "what it does" page shows on the Add-ons page.
+    pub addon_about: Option<&'static str>,
 }
 
 /// Whether Windows lets Oyenza Studio read a game's frames. Its event tracing
@@ -607,11 +612,6 @@ pub struct PrayerState {
     pub clock_shift: i64,
 }
 
-impl PrayerState {
-    pub fn site(&self) -> Option<Site> {
-        self.place.as_ref().and_then(|p| p.site())
-    }
-}
 
 /// What Oyenza Studio Recorder last said about its recording
 /// (`poni_core::recorder::Message::State`).
@@ -783,6 +783,8 @@ pub struct AppState {
     pub ui: PageUiState,
     /// System accent colour (falls back to blue).
     pub accent: Color,
+    /// Horizon theme shooting star animation & schedule.
+    pub horizon_star: crate::pill::horizon::ShootingStar,
     /// Steps from the person's phone, sent by Oyenza (None until connected).
     pub health: Option<HealthSnapshot>,
     /// The page currently shown when expanded.
@@ -831,8 +833,13 @@ pub struct AppState {
     pub downloader_offered: bool,
     /// The recorder's recording, as it last told the island.
     pub rec: RecView,
-    /// Whether Windows lets the Notifications add-on read notifications.
+    /// Whether Windows lets the island read notifications.
     pub notify_access: NotifyAccess,
+    /// This copy can read other apps' notifications: Windows lets only an app
+    /// with a package identity, the Microsoft Store copy, do it. The download
+    /// can't, so it offers no Notifications at all. Set once at start (the
+    /// self-test sets it per scene).
+    pub notify_can: bool,
     /// The AI tab's readings (its choices: `settings.usage`).
     pub usage: UsageState,
     /// The IELTS page's session with Oyen (the IELTS add-on).
@@ -895,6 +902,7 @@ impl AppState {
             app_icons: HashMap::new(),
             ui: PageUiState::default(),
             accent: palette::BLUE,
+            horizon_star: Default::default(),
             health: None,
             page,
             media_paused_at: None,
@@ -917,6 +925,7 @@ impl AppState {
             downloader_offered: false,
             rec: RecView::default(),
             notify_access: NotifyAccess::Unknown,
+            notify_can: false,
             usage: UsageState::default(),
             ielts: Default::default(),
             notes: Default::default(),
@@ -924,6 +933,9 @@ impl AppState {
         };
         // A list from a hand-edited file keeps to codes, each once, ten at most.
         st.store.stocks.tidy();
+        // Drinks in time order, each with its own id (old ones go when one is
+        // added, with the real time).
+        st.store.caffeine.mend();
         // On ones start by checking their files (the worker reports back);
         // one without files is ready at once.
         for a in poni_core::addons::ALL {
@@ -938,11 +950,13 @@ impl AppState {
             PageKind::System => !st.system_on(),
             PageKind::Health => !st.health_on(),
             PageKind::Stocks => !st.stocks_on(),
+            PageKind::Caffeine => !st.caffeine_on(),
             PageKind::Downloads => !st.downloader_on(),
             PageKind::Record => !st.record_on(),
             PageKind::Notifications => !st.notifications_on(),
             PageKind::Ielts => !st.ielts_on(),
             PageKind::Notes => !st.notes_on(),
+            PageKind::Ai => !st.ai_usage_on(),
             p => st.tab_hidden(p),
         };
         if off {
@@ -989,9 +1003,9 @@ impl AppState {
         (self.rec.phase == Some(RecPhase::Recording)).then(|| 1.0 - self.rec_elapsed().fract())
     }
 
-    /// The Script reader add-on is on: the Script tab shows.
+    /// The Script reader add-on is removed in this build.
     pub fn script_on(&self) -> bool {
-        self.addon(poni_core::addons::SCRIPT_READER.id) == AddonStatus::Ready
+        false
     }
 
     /// The System add-on is on: the System tab shows.
@@ -999,31 +1013,36 @@ impl AppState {
         self.addon(poni_core::addons::SYSTEM.id) == AddonStatus::Ready
     }
 
-    /// The Health add-on is on: the Health tab shows and the steps are asked for.
+    /// The Health add-on is removed in this build.
     pub fn health_on(&self) -> bool {
-        self.addon(poni_core::addons::HEALTH.id) == AddonStatus::Ready
+        false
     }
 
-    /// The Stocks add-on is on: the Stocks tab shows (its prices are asked
-    /// for only while the page is on screen).
+    /// The Stocks add-on is removed in this build.
     pub fn stocks_on(&self) -> bool {
-        self.addon(poni_core::addons::STOCKS.id) == AddonStatus::Ready
+        false
     }
 
-    /// The Downloader add-on is on, with its tools in place, for an account
-    /// with Studio Pro: the Downloads tab shows.
+    /// The Caffeine add-on is removed in this build.
+    pub fn caffeine_on(&self) -> bool {
+        false
+    }
+
+    /// The Downloader add-on is removed in this build.
     pub fn downloader_on(&self) -> bool {
-        self.downloader_offered && self.studio_pro() == Some(true) && self.addon(poni_core::addons::DOWNLOADER.id) == AddonStatus::Ready
+        false
     }
 
-    /// The Notifications add-on is on (Windows): its tab shows, and new
-    /// notifications from the apps picked there show on the island.
+    /// Notifications is on: its tab shows, and new notifications from the
+    /// apps picked there show on the island. On by default wherever this copy
+    /// can read them (`notify_can`); its chip in Settings' tabs row switches
+    /// it off.
     pub fn notifications_on(&self) -> bool {
-        cfg!(windows) && self.addon(poni_core::addons::NOTIFICATIONS.id) == AddonStatus::Ready
+        self.notify_can && !self.tab_hidden(PageKind::Notifications)
     }
 
     /// Settings took this page's tab off the header's row (Music, Today,
-    /// Shelf, Tasks or Focus).
+    /// Shelf, Tasks, Focus or Notifications).
     pub fn tab_hidden(&self, p: PageKind) -> bool {
         p.hideable() && self.settings.hidden_tabs.iter().any(|k| k == p.key())
     }
@@ -1034,6 +1053,11 @@ impl AppState {
         self.addon(poni_core::addons::IELTS.id) == AddonStatus::Ready && self.oyenza.pro != Some(false)
     }
 
+    /// AI usage add-on is removed in this build.
+    pub fn ai_usage_on(&self) -> bool {
+        false
+    }
+
     /// The signed-in account has Studio Pro, as the server last said.
     pub fn studio_pro(&self) -> Option<bool> {
         match self.oyenza.link {
@@ -1042,14 +1066,20 @@ impl AppState {
         }
     }
 
-    /// The Meeting notes add-on is on: the Notes tab shows.
+    /// The Meeting notes add-on is removed in this build.
     pub fn notes_on(&self) -> bool {
-        self.addon(poni_core::addons::MEETING_NOTES.id) == AddonStatus::Ready
+        false
     }
 
-    /// Prayer times is on and its places are read: the tab and reminders run.
+    /// Prayer times is built in and ready once its places are loaded.
     pub fn prayer_on(&self) -> bool {
-        self.addon(poni_core::addons::PRAYER_TIMES.id) == AddonStatus::Ready && self.prayer.places.is_some()
+        self.prayer.places.is_some()
+    }
+
+    /// The place the times are for, as the engine needs it, with the
+    /// person's choice of Kemenag's or Muhammadiyah's times.
+    pub fn prayer_site(&self) -> Option<Site> {
+        self.prayer.place.as_ref().and_then(|p| p.site_for(self.settings.prayer.follow))
     }
 
     /// The prayer clock, UTC seconds (the self-test moves it).
@@ -1062,7 +1092,7 @@ impl AppState {
     /// since what rings follows the prayer clock, not the countdown. Returns
     /// the prayer put away (none when no countdown runs).
     pub fn prayer_countdown_ok(&mut self) -> Option<PrayerMoment> {
-        let site = self.prayer.site()?;
+        let site = self.prayer_site()?;
         let (m, _) = poni_core::prayer::countdown(&site, self.prayer_now(), self.settings.prayer.remind_before_min)?;
         self.prayer.countdown_ok = Some(m.at);
         Some(m)

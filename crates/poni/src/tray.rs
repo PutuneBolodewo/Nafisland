@@ -34,7 +34,7 @@ impl Tray {
                 hIcon: icon,
                 ..Default::default()
             };
-            let tip: Vec<u16> = format!("Oyenza Studio {}", crate::version::VERSION).encode_utf16().collect();
+            let tip: Vec<u16> = format!("{} {}", poni_core::brand::APP_NAME, crate::version::VERSION).encode_utf16().collect();
             nid.szTip[..tip.len()].copy_from_slice(&tip);
             if !Shell_NotifyIconW(NIM_ADD, &nid).as_bool() {
                 return Err(windows::core::Error::from_win32());
@@ -110,7 +110,7 @@ fn item(label: &str, cmd: MenuCmd, checked: bool) -> MenuItem {
 fn idle_label(s: IdleStyle, theme: Theme) -> &'static str {
     match s {
         IdleStyle::Clock => "Clock",
-        IdleStyle::Eyes if theme == Theme::Oyen => "Oyen",
+        IdleStyle::Eyes if theme == Theme::Oyen => poni_core::brand::MASCOT_NAME,
         IdleStyle::Eyes => "Eyes",
         IdleStyle::Minimal => "Minimal",
         IdleStyle::Hidden => "Hidden until hover",
@@ -130,9 +130,12 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         item("Advanced settings…", MenuCmd::ShowSettings, false),
         MenuItem::Separator,
         item("Keep island open", MenuCmd::TogglePinned, pinned),
-        MenuItem::Sub { label: "Theme".into(), items: vec![theme("Classic", Theme::Classic), theme("Oyen", Theme::Oyen), theme("Glass", Theme::Glass), theme("Pill", Theme::Pill)] },
+        MenuItem::Sub {
+            label: "Theme".into(),
+            items: vec![theme("Classic", Theme::Classic), theme(poni_core::brand::MASCOT_NAME, Theme::Oyen), theme("Glass", Theme::Glass), theme("Pill", Theme::Pill), theme("Diorama", Theme::Diorama), theme("Horizon", Theme::Horizon)],
+        },
         // The status bar is listed only in Pill, as on the Settings page: the
-        // other themes would draw the clock for it.
+        // other themes would draw the clock for it (Diorama its picture).
         MenuItem::Sub { label: "Idle look".into(), items: crate::pill::status::looks(s.theme).iter().map(|l| style(*l)).collect() },
         MenuItem::Separator,
         item("Synced lyrics", MenuCmd::ToggleLyrics, s.lyrics),
@@ -159,7 +162,7 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         // Which version and build this is, as the Mac menu says it.
         item(&crate::version::about_label(), MenuCmd::About, false),
         MenuItem::Separator,
-        item("Quit Oyenza Studio", MenuCmd::Quit, false),
+        item(concat!("Quit ", env!("BRAND_APP_NAME")), MenuCmd::Quit, false),
     ];
     // Only once the island was dragged off the middle: the way back, under Keep island open.
     if s.island_x.is_some() {
@@ -179,7 +182,7 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
     match update {
         // A new version first, until it is installed.
         UpdateLine::Offer(v) => {
-            items.splice(0..0, [item(&format!("Update to Oyenza Studio {v}…"), MenuCmd::Update, false), MenuItem::Separator]);
+            items.splice(0..0, [item(&format!("Update to {} {v}…", poni_core::brand::APP_NAME), MenuCmd::Update, false), MenuItem::Separator]);
         }
         // Otherwise a look on request, under the version line.
         UpdateLine::Check => {
@@ -308,7 +311,7 @@ mod tests {
             .collect();
         let at = |cmd: MenuCmd| labels.iter().position(|l| l.1 == cmd);
         let about = at(MenuCmd::About).expect("no About line");
-        assert!(labels[about].0.starts_with(&format!("About Oyenza Studio {}", env!("CARGO_PKG_VERSION"))), "{}", labels[about].0);
+        assert!(labels[about].0.starts_with(&format!("About {} {}", poni_core::brand::APP_NAME, env!("CARGO_PKG_VERSION"))), "{}", labels[about].0);
         // Right above Quit, with the lyrics credit kept above it.
         assert_eq!(at(MenuCmd::Quit), Some(about + 1));
         assert_eq!(at(MenuCmd::LyricsCredit), Some(about - 1));
@@ -321,7 +324,7 @@ mod tests {
             Some(MenuItem::Item { label, cmd, .. }) => Some((label, cmd)),
             _ => None,
         };
-        assert_eq!(first(UpdateLine::Offer("0.2.5".into())), Some(("Update to Oyenza Studio 0.2.5…".to_string(), MenuCmd::Update)));
+        assert_eq!(first(UpdateLine::Offer("0.2.5".into())), Some((format!("Update to {} 0.2.5…", poni_core::brand::APP_NAME), MenuCmd::Update)));
         assert_eq!(first(UpdateLine::None).map(|(_, cmd)| cmd), Some(MenuCmd::RecordScreen));
         assert_eq!(first(UpdateLine::Check).map(|(_, cmd)| cmd), Some(MenuCmd::RecordScreen));
     }
@@ -407,12 +410,62 @@ mod tests {
         assert_eq!(idle_choices(&pill).last(), Some(&("Status bar".to_string(), true)));
         // Another theme draws the clock for the status bar: Clock is checked,
         // and Status comes back with Pill.
-        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass] {
+        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Diorama] {
             let s = Settings { theme, ..pill.clone() };
             let choices = idle_choices(&s);
-            assert_eq!(choices.len(), 4, "{theme:?}");
+            assert_eq!(choices.len(), if theme == Theme::Diorama { 3 } else { 4 }, "{theme:?}");
             assert_eq!(choices[0], ("Clock".to_string(), true), "{theme:?}");
             assert!(choices.iter().skip(1).all(|c| !c.1), "{theme:?}");
+            assert!(choices.iter().all(|c| c.0 != "Status bar"), "{theme:?}");
+        }
+        // Diorama's looks by name: its picture with the time, the picture
+        // alone, and nothing until the pointer comes. It has no eyes: a
+        // setting left on Eyes shows the picture alone, so Minimal is checked.
+        let diorama = Settings { theme: Theme::Diorama, idle_style: IdleStyle::Minimal, ..Settings::default() };
+        let looks = [("Clock".to_string(), false), ("Minimal".to_string(), true), ("Hidden until hover".to_string(), false)];
+        assert_eq!(idle_choices(&diorama), looks);
+        assert_eq!(idle_choices(&Settings { idle_style: IdleStyle::Eyes, ..diorama }), looks);
+    }
+
+    /// Where a theme comes in the menu. No `_` arm: a theme added to the
+    /// enum stops this compiling until it has a place, and then the test
+    /// below asks the menu for it.
+    fn place(t: Theme) -> usize {
+        match t {
+            Theme::Classic => 0,
+            Theme::Oyen => 1,
+            Theme::Glass => 2,
+            Theme::Pill => 3,
+            Theme::Diorama => 4,
+            Theme::Horizon => 5,
+        }
+    }
+
+    fn theme_choices(s: &Settings) -> Vec<(String, MenuCmd, bool)> {
+        let items = menu_items(s, false, &OyenzaLink::Off, false, UpdateLine::None);
+        let Some(MenuItem::Sub { items, .. }) = items.into_iter().find(|i| matches!(i, MenuItem::Sub { label, .. } if label == "Theme")) else {
+            panic!("no theme submenu");
+        };
+        items
+            .into_iter()
+            .filter_map(|i| match i {
+                MenuItem::Item { label, cmd, checked } => Some((label, cmd, checked)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_theme_submenu_has_every_theme_and_checks_the_one_in_use() {
+        let names = ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon"];
+        let choices = theme_choices(&Settings::default());
+        assert_eq!(choices.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), names);
+        for (i, (label, cmd, _)) in choices.iter().enumerate() {
+            let MenuCmd::SetTheme(theme) = *cmd else { panic!("{label} doesn't set a theme") };
+            assert_eq!(place(theme), i, "{label}");
+            // Picked, it is the one checked.
+            let checked: Vec<bool> = theme_choices(&Settings { theme, ..Settings::default() }).into_iter().map(|c| c.2).collect();
+            assert_eq!(checked, (0..names.len()).map(|j| j == i).collect::<Vec<_>>(), "{label}");
         }
     }
 

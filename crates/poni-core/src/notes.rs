@@ -301,13 +301,13 @@ impl Problem {
             Problem::Paused => "Meeting notes are paused",
             Problem::DailyCap => "Today's minutes are used up",
             Problem::TooLong => "That meeting is too long",
-            Problem::Busy(_) => "Oyen is swamped",
-            Problem::AiFailed | Problem::Server | Problem::Gone | Problem::TooSlow => "Oyen couldn't write the notes",
-            Problem::NothingHeard => "Oyen didn't hear anyone",
+            Problem::Busy(_) => "Notes service is busy",
+            Problem::AiFailed | Problem::Server | Problem::Gone | Problem::TooSlow => "Couldn't write the notes",
+            Problem::NothingHeard => "Didn't hear anyone",
             Problem::Unfinished => "Your last meeting isn't written up",
-            Problem::ProRequired => "Meeting notes are part of Studio Pro",
-            Problem::Offline => "Can't reach Oyenza",
-            Problem::SignedOut => "You're signed out of Oyenza",
+            Problem::ProRequired => "Meeting notes require Pro",
+            Problem::Offline => "Can't reach the notes service",
+            Problem::SignedOut => "You're signed out",
             Problem::Capture(CaptureIssue::MicDenied) => "The microphone is blocked",
             Problem::Capture(CaptureIssue::NoSound) => "No sound to record",
             Problem::Capture(CaptureIssue::Failed) => "Recording stopped",
@@ -317,19 +317,20 @@ impl Problem {
     /// What to do about it. The recording stays on this PC for Try again
     /// until the notes are saved or it is thrown away.
     pub fn line(self) -> String {
+        let app = crate::brand::APP_NAME;
         match self {
-            Problem::Paused => "Oyen is resting. Your recording is kept: try again later.".into(),
+            Problem::Paused => "Notes service is resting. Your recording is kept: try again later.".into(),
             Problem::DailyCap => "Your recording is kept. Try again tomorrow.".into(),
             Problem::TooLong => "Meetings up to 3 hours are written up.".into(),
             Problem::Busy(Some(s)) if s > 1 => format!("Your recording is kept. Try again in {s} seconds."),
             Problem::Busy(_) => "Your recording is kept. Try again in a minute.".into(),
             Problem::AiFailed | Problem::Server | Problem::Gone | Problem::TooSlow => "Your recording is kept. Try again.".into(),
             Problem::NothingHeard => "Was the call muted? Check that the bars move next time.".into(),
-            Problem::Unfinished => "Its recording was kept when Oyenza Studio closed. Write it up now, or throw it away.".into(),
-            Problem::ProRequired => "This Oyenza account doesn't have Pro. Your recording is kept.".into(),
+            Problem::Unfinished => format!("Its recording was kept when {app} closed. Write it up now, or throw it away."),
+            Problem::ProRequired => "This account doesn't have Pro. Your recording is kept.".into(),
             Problem::Offline => "Your recording is kept. Check the internet, then try again.".into(),
-            Problem::SignedOut => "Sign in to Oyenza again: your recording is kept.".into(),
-            Problem::Capture(CaptureIssue::MicDenied) if cfg!(target_os = "macos") => "Turn on Oyenza Studio in System Settings \u{203a} Privacy & Security \u{203a} Microphone.".into(),
+            Problem::SignedOut => "Sign in again: your recording is kept.".into(),
+            Problem::Capture(CaptureIssue::MicDenied) if cfg!(target_os = "macos") => format!("Turn on {app} in System Settings \u{203a} Privacy & Security \u{203a} Microphone."),
             Problem::Capture(CaptureIssue::MicDenied) => "Turn on microphone access for desktop apps in Windows Settings.".into(),
             Problem::Capture(CaptureIssue::NoSound) => "Plug in a microphone or speakers, then try again.".into(),
             Problem::Capture(CaptureIssue::Failed) => "A sound device went away. What was heard is kept.".into(),
@@ -527,7 +528,7 @@ pub fn markdown(n: &Notes, started: &LocalDateTime, with_transcript: bool) -> St
             md += &format!("**[{}] {}:** {}\n\n", fmt_length(l.t), l.who, l.text);
         }
     }
-    md += "\n---\nNotes by Oyen, in Oyenza Studio\n";
+    md += &format!("\n---\nNotes in {}\n", crate::brand::APP_NAME);
     md
 }
 

@@ -1,0 +1,17 @@
+# Centralized brand configuration for Nafisland (white-label ready).
+# Edit these values and rebuild to customize product name, vendor, and endpoints.
+
+app_name = "Nafisland"
+app_short_name = "Nafisland"
+mascot_name = "Nafisland"
+vendor_name = "Nafisland"
+copyright = "Copyright (C) 2026 Nafisland"
+description = "Nafisland - a living notch for Windows"
+support_email = "support@nafisland.app"
+repo_url = "https://github.com/example/nafisland"
+
+# External service endpoints. Leave empty ("") to disable upstream calls.
+update_feed_url = ""
+drop_server_url = ""
+places_base_url = ""
+addons_releases_url = ""

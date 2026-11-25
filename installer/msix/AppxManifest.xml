@@ -18,7 +18,7 @@
   <Identity Name="$IdentityName$" Publisher="$Publisher$" Version="$Version$" ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>Oyenza Studio</DisplayName>
+    <DisplayName>Nafisland</DisplayName>
     <PublisherDisplayName>$PublisherDisplayName$</PublisherDisplayName>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
@@ -36,7 +36,7 @@
   <Applications>
     <Application Id="Poni" Executable="poni.exe" EntryPoint="Windows.FullTrustApplication">
       <uap:VisualElements
-        DisplayName="Oyenza Studio"
+        DisplayName="Nafisland"
         Description="A living notch for Windows: music with synced lyrics, your day, a focus timer, your steps, a file shelf and tasks."
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
@@ -44,7 +44,7 @@
       <Extensions>
         <!-- "Start with Windows". TaskId must match TASK_ID in crates/poni/src/autostart.rs. -->
         <uap5:Extension Category="windows.startupTask" Executable="poni.exe" EntryPoint="Windows.FullTrustApplication">
-          <uap5:StartupTask TaskId="PoniStartup" Enabled="true" DisplayName="Oyenza Studio" />
+          <uap5:StartupTask TaskId="PoniStartup" Enabled="true" DisplayName="Nafisland" />
         </uap5:Extension>
       </Extensions>
     </Application>
@@ -55,8 +55,9 @@
     <Capability Name="internetClient" />
     <!-- Phone drop: a page on the home network for the user's own phone, while its panel is open. -->
     <Capability Name="privateNetworkClientServer" />
-    <!-- The Notifications add-on (off by default): other apps' notifications on the island,
-         read on the PC and never sent anywhere. Windows asks the person before it allows it. -->
+    <!-- Notifications (on by default in this copy, off under Tabs in Settings): other apps'
+         notifications on the island, read on the PC and never sent anywhere. Windows asks the
+         person before it allows it. -->
     <uap3:Capability Name="userNotificationListener" />
     <!-- A desktop app: runs outside the app sandbox, like the installer build. -->
     <rescap:Capability Name="runFullTrust" />

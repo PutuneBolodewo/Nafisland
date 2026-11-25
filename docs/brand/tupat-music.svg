@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" id="bunny" viewBox="0 0 500 620" role="img" aria-label="White bunny mascot with black sunglasses">
+<style>
+/* Procedural mascot animation: gentle idle motion + periodic blink */
+#headRig {
+  transform-box: view-box;
+  transform-origin: 250px 300px;
+  animation: head-bob 3.2s ease-in-out infinite;
+}
+#ears {
+  transform-box: view-box;
+  transform-origin: 250px 280px;
+  animation: ear-sway 3.2s ease-in-out infinite;
+}
+#sunglasses {
+  transform-box: view-box;
+  transform-origin: 250px 330px;
+  animation: shades-dip 7s ease-in-out infinite;
+}
+#body {
+  transform-box: view-box;
+  transform-origin: 250px 540px;
+  animation: body-breathe 3.2s ease-in-out infinite;
+}
+#eyes {
+  animation: eye-hide 7s infinite;
+}
+#closedEyes {
+  animation: blink 7s infinite;
+}
+.note {
+  animation: music-note 2.4s ease-in-out infinite;
+}
+#note2 { animation-delay: .8s; }
+#note3 { animation-delay: 1.6s; }
+
+@keyframes head-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-3px) rotate(-1deg); }
+  50% { transform: translateY(0) rotate(0deg); }
+  75% { transform: translateY(-2px) rotate(1deg); }
+}
+@keyframes ear-sway {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-1.8deg); }
+  75% { transform: rotate(1.8deg); }
+}
+@keyframes shades-dip {
+  0%, 35%, 100% { transform: translateY(0); }
+  42%, 55% { transform: translateY(-88px); }
+  62% { transform: translateY(0); }
+}
+@keyframes body-breathe {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(1.012); }
+}
+@keyframes eye-hide {
+  0%, 46%, 50%, 100% { opacity: 1; }
+  47%, 49% { opacity: 0; }
+}
+@keyframes blink {
+  0%, 46%, 50%, 100% { opacity: 0; }
+  47%, 49% { opacity: 1; }
+}
+@keyframes music-note {
+  0% { opacity: 0; transform: translateY(10px) scale(.8); }
+  20% { opacity: .8; }
+  100% { opacity: 0; transform: translateY(-28px) scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  #headRig, #ears, #sunglasses, #body, #eyes, #closedEyes, .note {
+    animation: none !important;
+  }
+}
+</style>
+<style>.eye{transition:opacity .18s}.note{opacity:0;transform-box:fill-box;transform-origin:center;pointer-events:none}</style>
+<g id="body" fill="#fff" stroke="#080808" stroke-width="11" stroke-linejoin="round"><path d="M112 447 C86 483 62 542 49 620 L451 620 C438 542 414 483 388 447 C332 480 168 480 112 447Z"/></g>
+<g id="headRig">
+<g id="ears" fill="#fff" stroke="#080808" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+<g id="leftEar"><path d="M112 250 C87 183 96 94 157 27 C182 0 217 14 219 52 C221 103 202 164 189 218"/></g>
+<g id="rightEar"><path d="M290 220 C321 135 359 39 415 22 C456 10 470 47 458 91 C444 143 414 192 386 239"/></g>
+<g id="innerEar"><path d="M331 190 C350 143 375 91 410 58" fill="none" stroke-width="9"/></g>
+</g>
+<path d="M45 287 C55 218 118 190 183 191 C250 175 319 192 370 203 C434 216 463 274 457 347 C453 416 416 458 348 463 C276 479 185 476 116 462 C50 449 22 390 31 333 C34 314 38 298 45 287Z" fill="#fff" stroke="#080808" stroke-width="11" stroke-linejoin="round"/>
+<g id="face">
+<g id="brows" fill="none" stroke="#080808" stroke-width="8" stroke-linecap="round"><path d="M112 286 Q150 269 188 282"/><path d="M310 282 Q350 269 388 286"/></g>
+<g id="eyes" class="eye" fill="none" stroke="#080808" stroke-width="10" stroke-linecap="round">
+<g id="leftEye"><path d="M126 326 Q151 350 176 326"/></g><g id="rightEye"><path d="M324 326 Q349 350 374 326"/></g>
+</g>
+<g id="closedEyes" fill="none" stroke="#080808" stroke-width="9" stroke-linecap="round" opacity="0"><path d="M122 331 Q151 349 180 331"/><path d="M320 331 Q349 349 378 331"/></g>
+<g id="noseMouth" fill="#080808" stroke="#080808" stroke-linecap="round" stroke-linejoin="round"><g id="nose"><path d="M235 355 Q250 345 265 355 Q264 370 250 373 Q236 370 235 355Z"/></g><g id="mouth"><path d="M250 371 L250 390 M250 390 Q234 408 218 397 M250 390 Q266 408 282 397" fill="none" stroke-width="8"/></g></g>
+<g id="musicSmile" opacity="0" fill="none" stroke="#080808" stroke-width="8" stroke-linecap="round"><path d="M230 389 Q250 407 270 389"/></g>
+</g>
+<g id="sunglasses" stroke="#080808" stroke-width="9" stroke-linejoin="round">
+<g id="lensLeft"><path d="M24 278 Q72 258 155 267 Q205 270 213 292 Q207 350 161 366 Q104 384 66 351 Q35 326 24 278Z" fill="#050505"/></g>
+<g id="lensRight"><path d="M287 292 Q295 270 345 267 Q428 258 476 278 Q465 326 434 351 Q396 384 339 366 Q293 350 287 292Z" fill="#050505"/></g>
+<g id="bridge"><path d="M208 290 Q250 275 292 290" fill="none" stroke-width="13"/></g>
+<path d="M25 280 L6 276 M475 280 L494 276" fill="none" stroke-width="10" stroke-linecap="round"/>
+</g>
+<g id="notes" fill="#080808"><text class="note" id="note1" x="12" y="200" font-size="34">♪</text><text class="note" id="note2" x="440" y="230" font-size="29">♫</text><text class="note" id="note3" x="28" y="300" font-size="24">♪</text></g>
+</g>
+</svg>

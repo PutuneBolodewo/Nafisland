@@ -165,7 +165,7 @@ pub fn prayer_countdown(st: &AppState) -> Option<(poni_core::prayer::Prayer, i64
     if !st.prayer_on() {
         return None;
     }
-    let site = st.prayer.site()?;
+    let site = st.prayer_site()?;
     poni_core::prayer::countdown(&site, st.prayer_now(), st.settings.prayer.remind_before_min)
         .filter(|(m, _)| st.prayer.countdown_ok != Some(m.at))
         .map(|(m, left)| (m.prayer, left))
@@ -359,7 +359,8 @@ pub fn next_wake(m: &Mode, st: &AppState) -> Option<f64> {
         if !night(st) {
             consider(oyen::next_rest_move(now));
         }
-    } else if *m == Mode::Idle && st.settings.idle_style == IdleStyle::Eyes {
+    } else if *m == Mode::Idle && st.settings.idle_style == IdleStyle::Eyes && !crate::pill::diorama::shows(st) {
+        // (The Diorama theme rests as its picture, which has no eyes to blink.)
         let phase = now % BLINK_PERIOD;
         consider(if phase < BLINK_LEN { now - phase + BLINK_LEN } else { now - phase + BLINK_PERIOD });
     }
@@ -406,6 +407,8 @@ fn draw_oyen_rest(ui: &mut Ui, st: &AppState, body: Rect, cx: f32, w: f32, bar_y
 }
 
 pub fn draw(ui: &mut Ui, st: &mut AppState, m: &Mode, body: Rect) {
+    // The Caffeine page's chart goes once the island has been closed a moment.
+    crate::pages::caffeine::put_away(ui, st);
     if crate::pill::draw(ui, st, m, body) {
         return;
     }
@@ -430,9 +433,16 @@ fn draw_idle(ui: &mut Ui, st: &mut AppState, body: Rect) {
     match st.settings.idle_style {
         IdleStyle::Clock | IdleStyle::Status => {
             // Oyen theme: he peeks on the left and the clock centres in the rest.
+            // Horizon theme: celestial icon synced with Prayer Times sits on the left.
             let body = if oyen::on(st.settings.theme) {
                 draw_oyen_rest(ui, st, body, body.x + 11.0 + OYEN_CLOCK_W / 2.0, OYEN_CLOCK_W, body.bottom() - 5.0);
                 Rect::new(body.x + OYEN_CLOCK_LEAD, body.y, body.w - OYEN_CLOCK_LEAD, body.h)
+            } else if st.settings.theme == poni_core::settings::Theme::Horizon {
+                let icon = crate::pill::horizon::celestial_icon(st);
+                let pal = crate::pill::horizon::palette(st);
+                let r = Rect::new(body.x + 12.0, cy - 7.0, 14.0, 14.0);
+                ui.c.icon(icon, r, pal.accent);
+                Rect::new(body.x + 20.0, body.y, body.w - 20.0, body.h)
             } else {
                 body
             };
@@ -1097,7 +1107,7 @@ mod tests {
         let mut st = playing(Some("[00:10.00]紙の舟よ\n[00:14.00]Paper boats\n"));
         assert_eq!(geom(&media, &st).h, 32.0, "no readings: one row");
         st.lyrics.ruby = vec![vec![Ruby { text: "紙の舟よ".into(), roman: "kami no fune yo".into() }], Vec::new()];
-        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill] {
+        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill, Theme::Diorama] {
             st.settings.theme = theme;
             assert_eq!(geom(&media, &st).h, crate::pill::media::H_READS, "{theme:?}: the line over its reading");
         }
@@ -1118,7 +1128,7 @@ mod tests {
         .expect("the place");
         st.prayer.place = list.find("jakarta").cloned();
         st.prayer.places = Some(std::sync::Arc::new(list));
-        let site = st.prayer.site().expect("its site");
+        let site = st.prayer_site().expect("its site");
         let times = poni_core::prayer::day_times(&site, site.local_day(st.unix)).expect("today's times");
         st.prayer.clock_shift = times.ashar - secs - st.unix;
         (st, times)
@@ -1244,29 +1254,8 @@ mod tests {
 
     #[test]
     fn downloads_show_while_nothing_else_is_live() {
-        let mut st = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
-        assert_eq!(current_activity(&st), Some(Activity::Download));
-        // Music and the timer keep the island while downloads run.
-        let song = with_downloads(playing(None), 1);
-        assert_eq!(current_activity(&song), Some(Activity::Media));
-        st.pomodoro.start(st.now);
-        assert_eq!(current_activity(&st), Some(Activity::Timer));
-        // So do a recording and a game's readout.
-        st.recorder = true;
-        st.store.recorder_island = true;
-        st.rec.phase = Some(poni_core::recorder::Phase::Recording);
-        assert_eq!(current_activity(&st), Some(Activity::Recording));
-        st.rec.phase = None;
-        st.game.active = true;
-        assert_eq!(current_activity(&st), Some(Activity::Game));
-        // Where the Downloader isn't offered (the Mac, for now): never.
-        let mut mac = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
-        mac.downloader_offered = false;
-        assert_eq!(current_activity(&mac), None);
-        // Nor for an account without Studio Pro.
-        let mut free = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
-        free.oyenza.pro = Some(false);
-        assert_eq!(current_activity(&free), None);
+        let st = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
+        assert_eq!(current_activity(&st), None, "downloader add-on is removed");
     }
 
     #[test]
@@ -1274,7 +1263,7 @@ mod tests {
         use poni_core::settings::Theme;
         let m = Mode::Activity(Activity::Download);
         let mut st = with_downloads(AppState::new(Settings::default(), Store::default()), 1);
-        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill] {
+        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill, Theme::Diorama] {
             st.settings.theme = theme;
             assert!(!is_live(&m, &st), "{theme:?}");
             assert_eq!(next_wake(&m, &st), None, "{theme:?}: it repaints as yt-dlp reports");
@@ -1299,14 +1288,14 @@ mod tests {
         st.downloads.apply(id, Line::Progress { done: 12_400_000, total: Some(45_100_000), speed: Some(2.1e6), eta_s: Some(14) });
         let DownloadView { fraction: Some(f), count: 1 } = download_view(&st) else { panic!("{:?}", download_view(&st)) };
         assert_eq!(download_pct(f), "27%");
-        for theme in [Theme::Classic, Theme::Pill] {
+        for theme in [Theme::Classic, Theme::Pill, Theme::Diorama] {
             st.settings.theme = theme;
             assert_eq!(geom(&m, &st).w, DOWNLOAD_W, "{theme:?}");
         }
         // A second one, queued: the count shows beside the mark.
         add(&mut st, "https://archive.org/details/BigBuckBunny_124");
         assert!(download_many(&st));
-        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill] {
+        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill, Theme::Diorama] {
             st.settings.theme = theme;
             assert_eq!(geom(&m, &st).w, DOWNLOAD_MANY_W, "{theme:?}");
         }
@@ -1314,6 +1303,45 @@ mod tests {
         st.downloads.apply(id, Line::Stage(poni_core::ytdlp::Stage::Merging));
         let DownloadView { fraction: Some(f), count: 2 } = download_view(&st) else { panic!("{:?}", download_view(&st)) };
         assert_eq!(download_pct(f), "100%");
+    }
+
+    #[test]
+    fn diorama_rests_as_its_picture_and_is_pill_in_everything_else() {
+        use poni_core::settings::Theme;
+        let state = |theme| {
+            let mut st = AppState::new(Settings { theme, ..Settings::default() }, Store::default());
+            st.power.has_battery = false;
+            st
+        };
+        let (mut pill, mut diorama) = (state(Theme::Pill), state(Theme::Diorama));
+        // Every look but Hidden is the picture, as long as a notch and 38
+        // tall where Pill's capsules are 32 and 24: with the time for the
+        // clock (and the status bar, which is Pill's), alone for Minimal
+        // (and Eyes).
+        for (look, w) in [(IdleStyle::Clock, 190.0), (IdleStyle::Status, 190.0), (IdleStyle::Minimal, 190.0), (IdleStyle::Eyes, 190.0)] {
+            diorama.settings.idle_style = look;
+            let g = geom(&Mode::Idle, &diorama);
+            assert_eq!((g.w, g.h, g.r), (w, 38.0, 19.0), "{look:?}");
+            assert!(!is_live(&Mode::Idle, &diorama), "{look:?}: nothing moves at rest");
+        }
+        pill.settings.idle_style = IdleStyle::Minimal;
+        assert_eq!(geom(&Mode::Idle, &pill).h, 24.0);
+        // No blink to wake for where the eyes are the picture.
+        assert_eq!(next_wake(&Mode::Idle, &diorama), None);
+        // Hidden stays Pill's, and so does everything live or open.
+        pill.settings.idle_style = IdleStyle::Hidden;
+        diorama.settings.idle_style = IdleStyle::Hidden;
+        assert_eq!(geom(&Mode::Idle, &diorama), geom(&Mode::Idle, &pill));
+        for m in [
+            Mode::Activity(Activity::Timer),
+            Mode::Activity(Activity::Download),
+            Mode::Hud(HudTag::Volume),
+            Mode::Notice,
+            Mode::Expanded(PageKind::Settings),
+            Mode::Aside,
+        ] {
+            assert_eq!(geom(&m, &diorama), geom(&m, &pill), "{m:?}");
+        }
     }
 
     #[test]

@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use windows::Win32::Security::Cryptography::{BCryptGenRandom, BCRYPT_ALG_HANDLE, BCRYPT_USE_SYSTEM_PREFERRED_RNG};
 
-const USER_AGENT: &str = concat!("OyenzaStudio/", env!("CARGO_PKG_VERSION"), " (+https://github.com/lucacadalora/oyenza-studio)");
+const USER_AGENT: &str = concat!(env!("BRAND_APP_NAME"), "/", env!("CARGO_PKG_VERSION"), " (+", env!("BRAND_REPO_URL"), ")");
 
 pub struct PairDropService {
     meet: Meet,
@@ -78,13 +78,14 @@ impl PairDropService {
     }
 }
 
-/// The meeting server: `PONI_DROP_SERVER` (for self-hosting and tests), else Oyenza's.
+/// The meeting server: `PONI_DROP_SERVER` (for self-hosting and tests), else configured default.
 fn server() -> String {
     std::env::var("PONI_DROP_SERVER")
         .ok()
         .map(|s| s.trim().trim_end_matches('/').to_string())
         .filter(|s| s.starts_with("https://") || s.starts_with("http://127.0.0.1") || s.starts_with("http://localhost"))
-        .unwrap_or_else(|| pairdrop::DEFAULT_SERVER.to_string())
+        .or_else(|| pairdrop::default_server().map(str::to_string))
+        .unwrap_or_default()
 }
 
 fn random16() -> Option<[u8; 16]> {

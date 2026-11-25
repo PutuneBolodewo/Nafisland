@@ -10,6 +10,8 @@
 pub mod addons;
 pub mod agenda;
 pub mod applemusic;
+pub mod brand;
+pub mod caffeine;
 pub mod datetime;
 pub mod downloads;
 pub mod frames;
@@ -18,6 +20,8 @@ pub mod geom;
 pub mod glass;
 pub mod hdr;
 pub mod health;
+pub mod hijri;
+pub mod horizon;
 pub mod ielts;
 pub mod look;
 pub mod lrc;
