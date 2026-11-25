@@ -384,6 +384,8 @@ pub struct App {
     glass: crate::glass::Glass,
     /// Prayer times' adzan, while it plays.
     adzan: services::adzan::AdzanPlayer,
+    /// Caffeine's reminder before last call: its minute and the day it showed.
+    last_call: crate::last_call::Reminder,
     /// The IELTS page's calls, microphone and voice (each only while needed).
     ielts: services::ielts::Kit,
     /// Music that played was paused for the IELTS session (it plays again after).
@@ -550,7 +552,7 @@ pub struct App {
     /// New versions (`crate::updates`); None in the self-test and in a
     /// Store copy, which the Store updates.
     updater: Option<crate::updates::Updater>,
-    /// The Notifications add-on's listener while it is on; None while it's
+    /// Notifications' listener while it is on; None while it's
     /// off, in the download (no package identity) and in the self-test.
     notify: Option<services::notifications::Listener>,
 }
@@ -640,6 +642,8 @@ impl App {
         st.local = clock::local_now();
         st.unix = clock::unix_now();
         st.accent = theme_accent(st.settings.theme);
+        // Notifications only where Windows lets this copy read them (the Store copy).
+        st.notify_can = crate::autostart::packaged();
         let mode = Mode::Idle;
         let mut island = Island::new(activities::geom(&mode, &st));
         island.set_floating(pill::on(st.settings.theme).then_some(pill::TOP_GAP));
@@ -673,6 +677,7 @@ impl App {
             services: None,
             glass: crate::glass::Glass::new(services::apps_use_light_theme()),
             adzan: Default::default(),
+            last_call: Default::default(),
             ielts: Default::default(),
             ielts_music: false,
             ielts_shown: false,
@@ -1133,6 +1138,12 @@ impl App {
                     self.drag_island(lp);
                     return Some(LRESULT(0));
                 }
+                if pill::diorama::slide(p.x, clock::mono()) {
+                    // The glass ball in hand follows the pointer (captured, so anywhere).
+                    self.input.mouse = Some(p);
+                    self.request_frame();
+                    return Some(LRESULT(0));
+                }
                 if self.over_stale_mask(p) {
                     // The pointer is over a part of the hit mask the outline
                     // already left: it isn't on the island.
@@ -1203,6 +1214,13 @@ impl App {
                         // The prayer countdown's OK, the same way.
                         self.input.pressed_id = None;
                         self.prayer_countdown_ok();
+                    } else if self.input.pressed_id == Some(wid(pill::diorama::BALL_ID)) {
+                        // Diorama's glass ball: in hand until the button comes
+                        // up, sliding with the pointer; the island neither
+                        // opens nor moves.
+                        self.input.pressed_id = None;
+                        pill::diorama::grab(&self.st, p.x);
+                        self.cancel_hover();
                     } else {
                         // Opens when the button comes up (`open_from_press`),
                         // unless the pointer moves sideways first: then it
@@ -1219,6 +1237,11 @@ impl App {
                 Some(LRESULT(0))
             }
             WM_LBUTTONUP => {
+                if pill::diorama::let_go(&self.st, clock::mono()) {
+                    // The ball rolls on to its end; the island stays closed under the pointer.
+                    self.input.pressed_id = None;
+                    self.cancel_hover();
+                }
                 if let Some(g) = self.grab.take() {
                     // What the closed island showed under the press doesn't click.
                     self.input.pressed_id = None;
@@ -1258,6 +1281,9 @@ impl App {
                 // (a drag leaves the island where it got to).
                 if lp.0 != self.hwnd.0 as isize && self.grab.take().is_some_and(|g| g.moved) {
                     self.dropped_island();
+                }
+                if lp.0 != self.hwnd.0 as isize && pill::diorama::let_go(&self.st, clock::mono()) {
+                    self.request_frame();
                 }
                 if lp.0 != self.hwnd.0 as isize && (self.input.down || self.input.pressed_id.is_some()) {
                     self.input.down = false;
@@ -1381,7 +1407,7 @@ impl App {
                 }
                 if msg == WM_SETTINGCHANGE && self.st.settings.theme == Theme::Glass {
                     self.st.accent = theme_accent(Theme::Glass);
-                } else if msg == WM_SETTINGCHANGE && !oyen::on(self.st.settings.theme) {
+                } else if msg == WM_SETTINGCHANGE && !oyen::on(self.st.settings.theme) && self.st.settings.theme != Theme::Diorama {
                     if let Some(a) = services::system_accent() {
                         self.st.accent = a;
                     }
@@ -1739,6 +1765,9 @@ impl App {
                 } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(activities::PRAYER_OK_ID)) {
                     // So does the prayer countdown under a pointer resting on
                     // its OK (resting on the rest of it still opens).
+                } else if self.input.mouse.and_then(|p| self.hit_at(p)).is_some_and(|h| h.id == wid(pill::diorama::BALL_ID)) {
+                    // And Diorama's resting pill under a pointer resting on its
+                    // glass ball, which is there to be slid.
                 } else {
                     self.expand();
                 }
@@ -1882,7 +1911,7 @@ impl App {
         let here = !self.locked && !self.display_off && self.selftest.is_none();
         let w = services::usage::Watch {
             open: here && self.mode == Mode::Expanded(PageKind::Ai),
-            notices: here && self.st.settings.usage.notices && !self.st.power.saver,
+            notices: here && self.st.settings.usage.notices && self.st.ai_usage_on() && !self.st.power.saver,
             near_pct: self.st.settings.usage.near_pct,
             use_24h: self.st.settings.use_24h,
             hidden: services::usage::picked(&self.st.settings.usage.hidden),
@@ -2117,8 +2146,8 @@ impl App {
         }
     }
 
-    /// Signed in (at start, or just now) with the Downloader switched on:
-    /// whether the account has Studio Pro, now, so its tab doesn't wait for
+    /// Signed in (at start, or just now) with AI usage or the Downloader on:
+    /// whether the account has Studio Pro, now, so their tabs don't wait for
     /// the Add-ons page to open (`pages::addons::pro_wanted`).
     fn ask_pro(&self) {
         if pages::addons::pro_wanted(&self.st) {
@@ -2277,10 +2306,11 @@ impl App {
                 }
             }
         }
-        // Notifications on: listen, Windows' question first; off: stop.
-        let notify_id = poni_core::addons::NOTIFICATIONS.id;
-        if before.addon_on(notify_id) != self.st.settings.addon_on(notify_id) && self.selftest.is_none() {
-            if self.st.settings.addon_on(notify_id) {
+        // Notifications switched on in Settings' tabs row: listen, Windows'
+        // question first; off: stop.
+        let notify_was = !before.hidden_tabs.iter().any(|k| k == PageKind::Notifications.key());
+        if self.st.notify_can && notify_was != self.st.notifications_on() && self.selftest.is_none() {
+            if self.st.notifications_on() {
                 self.start_notify(true);
             } else {
                 self.stop_notify();
@@ -2784,7 +2814,7 @@ impl App {
                 self.oyenza(OyenzaCmd::RefreshHealth);
             } else if self.st.page == PageKind::Notifications {
                 self.notify_cmd(NotifyCmd::Check);
-            } else if matches!(self.st.page, PageKind::Notes | PageKind::Ielts | PageKind::Addons) {
+            } else if matches!(self.st.page, PageKind::Notes | PageKind::Ielts | PageKind::Addons | PageKind::Ai) {
                 self.oyenza(OyenzaCmd::CheckPro);
             }
         }
@@ -3519,7 +3549,7 @@ impl App {
 
     fn refresh_time(&mut self) {
         self.st.now = clock::mono();
-        self.st.local = clock::local_now();
+        self.st.local = clock::local_shown();
         self.st.unix = clock::unix_now();
     }
 
@@ -3553,19 +3583,28 @@ impl App {
             pages::focus::on_phase_ended(&mut self.st, ended);
         }
         self.prayer_tick();
+        // Caffeine's reminder before last call waits for the island the same
+        // way, behind a prayer's notice, which doesn't wait. The self-test's
+        // clock jumps between pictures: it shows none.
+        let here = !self.fullscreen_hidden && !self.locked && !self.display_off && !self.expanded && !peeks;
+        if !self.in_selftest && self.last_call.tick(&mut self.st, here) {
+            self.request_frame();
+        }
         self.ielts_tick();
         self.notes_tick();
         self.script_tick();
-        // Prayer times, System, Health, Stocks, IELTS or Downloader switched off: its tab is gone.
+        // Prayer times, System, Health, Stocks, AI usage, IELTS or Downloader switched off: its tab is gone.
         let gone = match self.st.page {
             PageKind::Prayer => !self.st.prayer_on(),
             PageKind::System => !self.st.system_on(),
             PageKind::Health => !self.st.health_on(),
             PageKind::Stocks => !self.st.stocks_on(),
+            PageKind::Caffeine => !self.st.caffeine_on(),
             PageKind::Downloads => !self.st.downloader_on(),
             PageKind::Notifications => !self.st.notifications_on(),
             PageKind::Ielts => !self.st.ielts_on(),
             PageKind::Notes => !self.st.notes_on(),
+            PageKind::Ai => !self.st.ai_usage_on(),
             _ => false,
         };
         if gone {
@@ -3756,7 +3795,7 @@ impl App {
             self.gfx.prepare_glass(&p, canvas_px);
             Some(p)
         } else {
-            self.gfx.set_look(poni_core::look::of(self.st.settings.theme));
+            self.gfx.set_look(pill::look(&self.st, false));
             None
         };
         let (repaint, anim, focus, ui_live) = match self.gfx.begin(dirty) {
@@ -4058,6 +4097,11 @@ impl App {
         if let Some(t) = activities::next_wake(&self.mode, &self.st).filter(|_| watched) {
             consider(t);
         }
+        // Caffeine's reminder comes on its minute, the island asleep or not
+        // (one wake a day at most).
+        if let Some(t) = self.last_call.wake(&self.st) {
+            consider(t);
+        }
         if let Mode::Expanded(p) = self.mode {
             // A page's own changes rest while nobody is at the PC (the Prayer
             // page's countdown ticks every second); the lock and display
@@ -4317,7 +4361,7 @@ impl App {
         if self.st.settings.prayer.follow_location && self.st.prayer.located_at.is_none_or(|t| self.st.unix - t >= 3 * 3600) {
             self.locate();
         }
-        let Some(site) = self.st.prayer.site() else { return };
+        let Some(site) = self.st.prayer_site() else { return };
         let now = self.st.prayer_now();
         let Some(from) = self.st.prayer.handled_until else {
             self.st.prayer.handled_until = Some(now);
@@ -4339,7 +4383,7 @@ impl App {
     /// A prayer's time came: the island says so and plays the chosen sound.
     /// Quiet when it's late (after a sleep) or a full-screen app hides the island.
     fn prayer_moment(&mut self, m: PrayerMoment, ring: bool) {
-        let Some(site) = self.st.prayer.site() else { return };
+        let Some(site) = self.st.prayer_site() else { return };
         let place = self.st.prayer.place.as_ref().map_or(String::new(), |p| p.label.clone());
         let quiet = !ring || self.fullscreen_hidden;
         let sound = if quiet { PrayerSound::Silent } else { self.st.settings.prayer.sound };
@@ -4390,7 +4434,7 @@ impl App {
     /// countdown.
     fn prayer_countdown_ok(&mut self) {
         self.refresh_time();
-        if let (Some(m), Some(site)) = (self.st.prayer_countdown_ok(), self.st.prayer.site()) {
+        if let (Some(m), Some(site)) = (self.st.prayer_countdown_ok(), self.st.prayer_site()) {
             pinfo!("prayer: countdown put away until {} at {}", m.prayer.name(), site.hhmm(m.at));
         }
     }
@@ -4699,6 +4743,7 @@ impl App {
     fn set_page(&mut self, p: PageKind) {
         if p != self.st.page {
             self.st.page = p;
+            self.st.ui.addon_about = None;
             // Settings is never where the island opens next time.
             if p != PageKind::Settings {
                 self.st.update.sheet = false;
@@ -4721,7 +4766,7 @@ impl App {
                 self.oyenza(OyenzaCmd::RefreshHealth);
             } else if p == PageKind::Notifications {
                 self.notify_cmd(NotifyCmd::Check);
-            } else if matches!(p, PageKind::Notes | PageKind::Ielts | PageKind::Addons) {
+            } else if matches!(p, PageKind::Notes | PageKind::Ielts | PageKind::Addons | PageKind::Ai) {
                 self.oyenza(OyenzaCmd::CheckPro);
             }
         }
@@ -4855,8 +4900,8 @@ impl App {
 
     // ------------------------------------------------------------ notifications
 
-    /// The Notifications add-on came on (`ask`: by its switch, so Windows'
-    /// question comes now) or the app started with it on.
+    /// Notifications came on (`ask`: by its chip in Settings' tabs row, so
+    /// Windows' question comes now) or the app started with it on.
     fn start_notify(&mut self, ask: bool) {
         self.st.notify_access = NotifyAccess::Unknown;
         if self.notify.is_none() {
@@ -5411,6 +5456,13 @@ impl App {
         self.island.settled() && self.target_mode() == self.mode && self.page_anim.is_none() && self.outgoing.is_none() && !self.glass_moving
     }
 
+    /// Self-test: the frame just drawn left the frame clock running, so
+    /// something moves or asked for more frames (false = the app rests,
+    /// drawing nothing until an event or a timer wakes it).
+    pub fn selftest_frames_wanted(&self) -> bool {
+        self.clock.active()
+    }
+
     /// Self-test, Glass theme: `px` (BGRA, the window's size) is what's under
     /// the window, and Windows is in light (`app_light`) or dark mode.
     pub fn selftest_glass_backdrop(&mut self, px: Vec<u8>, w: i32, h: i32, app_light: bool) {
@@ -5510,6 +5562,29 @@ impl App {
         self.expanded
     }
 
+    /// The left button goes down at `p` (window DIPs) and stays down.
+    pub fn selftest_button_down(&mut self, p: Point) {
+        let lp = self.selftest_lparam(p);
+        self.handle_island(WM_LBUTTONDOWN, WPARAM(0), lp, &mut Vec::new());
+    }
+
+    /// The pointer moves to `p` with the left button down.
+    pub fn selftest_move(&mut self, p: Point) {
+        let lp = self.selftest_lparam(p);
+        self.handle_island(WM_MOUSEMOVE, WPARAM(0x0001), lp, &mut Vec::new());
+    }
+
+    /// The left button comes up at `p`.
+    pub fn selftest_button_up(&mut self, p: Point) {
+        let lp = self.selftest_lparam(p);
+        self.handle_island(WM_LBUTTONUP, WPARAM(0), lp, &mut Vec::new());
+    }
+
+    fn selftest_lparam(&self, p: Point) -> LPARAM {
+        let s = self.gfx.scale();
+        LPARAM(((((p.y * s).round() as i32 & 0xffff) << 16) | ((p.x * s).round() as i32 & 0xffff)) as isize)
+    }
+
     /// The island's centre, DIPs from its monitor's left edge.
     pub fn selftest_island_centre(&self) -> f32 {
         (self.surface.x - self.monitor.rect.left) as f32 / self.gfx.scale() + self.cx
@@ -5546,10 +5621,13 @@ impl App {
     }
 }
 
-/// Oyen's orange in his theme, Windows' accent colour otherwise.
+/// Oyen's orange in his theme, Diorama's own (which its day and night looks
+/// paint as theirs), Windows' accent colour otherwise.
 fn theme_accent(theme: Theme) -> Color {
     if oyen::on(theme) {
         oyen::ORANGE
+    } else if theme == Theme::Diorama {
+        poni_core::look::DIORAMA_ACCENT
     } else if theme == Theme::Glass {
         services::system_accent_base().unwrap_or(palette::BLUE)
     } else {
