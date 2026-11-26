@@ -1,6 +1,7 @@
 //! Pure logic for the EVE Online Intel Tool add-on: UTF-16LE chatlog
 //! tail-decoding, session filename matching, line parsing, and alert filtering.
 
+use crate::eve_map::EveMap;
 use std::path::PathBuf;
 
 /// Default keywords that suppress an alarm (e.g. a system reported clear).
@@ -159,6 +160,201 @@ pub fn should_alert(msg: &ChatMessage, ignore_words: &str) -> bool {
     true
 }
 
+/// Parse `EVE System > Channel changed to Local : <SystemName>` from a `Local_*.txt` line.
+pub fn parse_local_system_change(msg: &ChatMessage) -> Option<String> {
+    if !msg.is_system {
+        return None;
+    }
+    let rest = msg.text.trim().strip_prefix("Channel changed to Local :")?;
+    let sys = rest.trim();
+    if sys.is_empty() {
+        None
+    } else {
+        Some(sys.to_string())
+    }
+}
+
+/// True when `text` contains non-Latin script (Cyrillic, CJK, Hangul, Arabic, etc.).
+pub fn has_non_latin_script(text: &str) -> bool {
+    text.chars()
+        .any(|c| !c.is_ascii() && c.is_alphabetic() && !('\u{00C0}'..='\u{024F}').contains(&c))
+}
+
+/// Validated and parsed intel extracted from a chat message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParsedIntel {
+    pub systems: Vec<String>,
+    pub system_ids: Vec<u16>,
+    pub foreign_only: bool,
+    pub tags: Vec<String>,
+    pub ships: Vec<String>,
+    pub pilots: Vec<String>,
+}
+
+impl ParsedIntel {
+    /// Compact human-readable line for feed and collapsed-island notices.
+    pub fn summary(&self) -> String {
+        let sys = self.systems.join(", ");
+        if self.foreign_only {
+            return sys;
+        }
+        let mut parts = vec![sys];
+        if !self.tags.is_empty() {
+            parts.push(self.tags.join(" "));
+        }
+        if !self.ships.is_empty() {
+            parts.push(self.ships.join(" "));
+        }
+        if !self.pilots.is_empty() {
+            parts.push(self.pilots.join(" "));
+        }
+        parts.join(" · ")
+    }
+}
+
+fn clean_token(tok: &str) -> &str {
+    tok.trim_matches(|c: char| matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | ',' | '.' | ':' | ';' | '!' | '?' | '"' | '\'' | '*' | '<' | '>'))
+}
+
+fn is_count_or_spike_tag(tok: &str) -> bool {
+    let lower = tok.to_ascii_lowercase();
+    if lower == "spike" || lower == "despike" {
+        return true;
+    }
+    if let Some(rest) = lower.strip_prefix('+') {
+        return !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit());
+    }
+    if let Some(rest) = lower.strip_suffix('+') {
+        return !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit());
+    }
+    if let Some(rest) = lower.strip_prefix('x') {
+        return !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit());
+    }
+    false
+}
+
+fn is_filler_word(lower: &str) -> bool {
+    matches!(
+        lower,
+        "in" | "on" | "at" | "to" | "from" | "of" | "the" | "and" | "or" | "with" | "by" | "near" | "gate" | "plex" | "belt"
+            | "station" | "citadel" | "fort" | "fortizar" | "keep" | "keepstar" | "astra" | "astrahus" | "ansi" | "jb" | "scan"
+            | "dscan" | "nv" | "visual" | "grid" | "local" | "clr" | "clear" | "status" | "ping" | "warp" | "warping" | "+" | "-" | "/" | ">"
+    )
+}
+
+fn is_ship_type(lower: &str) -> bool {
+    let base = lower.strip_suffix('s').unwrap_or(lower);
+    matches!(
+        lower,
+        "sabre" | "flycatcher" | "eris" | "heretic" | "stiletto" | "malediction" | "ares" | "crow" | "crusader" | "taranis" | "raptor"
+            | "claw" | "interceptor" | "cept" | "ceptor" | "dictor" | "hic" | "hictor" | "broadword" | "broadsword" | "onyx" | "devoter"
+            | "phobos" | "loki" | "tengu" | "proteus" | "legion" | "t3" | "t3c" | "muninn" | "eagle" | "cerberus" | "cerb" | "vagabond"
+            | "ishtar" | "zealot" | "sacrilege" | "deimos" | "hac" | "rokh" | "megathron" | "mega" | "hyperion" | "raven" | "typhoon"
+            | "tempest" | "maelstrom" | "machariel" | "nightmare" | "barghest" | "bhaalgorn" | "rattlesnake" | "vindicator" | "redeemer"
+            | "sin" | "panther" | "widow" | "marshal" | "blops" | "marauder" | "paladin" | "golem" | "kronos" | "vargur" | "cyno"
+            | "titan" | "avatar" | "erebus" | "leviathan" | "ragnarok" | "super" | "nyx" | "hel" | "aeon" | "wyvern" | "revenant"
+            | "vendetta" | "carrier" | "thanatos" | "nidhoggur" | "archon" | "chimera" | "fax" | "apostle" | "minokawa" | "lif"
+            | "ninazu" | "dread" | "revelation" | "naglfar" | "phoenix" | "moros" | "zirnitra" | "rorq" | "rorqual" | "orca"
+            | "shuttle" | "pod" | "capsule" | "covops" | "astero" | "stratios" | "pacifier" | "enforcer" | "monitor" | "draugur"
+            | "kikimora" | "vedmak" | "ikishava" | "ikitursa" | "leshak" | "dreka" | "drekavac" | "rodiva" | "zarmazd" | "nomen"
+            | "omen" | "caracal" | "vexor" | "thorax" | "stabber" | "rupture" | "moa" | "maller" | "osprey" | "scythe" | "augoror"
+            | "exequror" | "basi" | "basilisk" | "scimitar" | "scimi" | "guardian" | "oneiros" | "arazu" | "lachesis" | "lach" | "rapier"
+            | "huginn" | "rook" | "falcon" | "pilgrim" | "curse" | "recon" | "hecate" | "jackdaw" | "svipul" | "confessor" | "t3d"
+            | "kestrel" | "condor" | "atron" | "rifter" | "slasher" | "punisher" | "executioner" | "tristan" | "worm" | "garmur"
+            | "daredevil" | "dramiel" | "succubus" | "cruor" | "catalyst" | "cormorant" | "thrasher" | "coercer" | "dragoon"
+            | "algos" | "corax" | "talwar" | "sunesis" | "gnosis" | "praxis" | "tornado" | "talos" | "oracle" | "naga" | "ferox"
+            | "drake" | "hurricane" | "cane" | "harbinger" | "myrmidon" | "brutix" | "prowler" | "viator" | "crane" | "prorator"
+            | "dst" | "impel" | "bustard" | "mastodon" | "occam" | "occator" | "freighter" | "jumpfreighter" | "jf" | "ark" | "rhea"
+            | "anshar" | "nomad"
+    ) || matches!(base, "sabre" | "dictor" | "hic" | "titan" | "super" | "dread" | "carrier" | "fax" | "cyno" | "shuttle" | "pod" | "ceptor" | "t3c" | "hac" | "blops" | "marauder" | "recon")
+}
+
+/// Strictly validate and parse an intel chat message using `map`.
+///
+/// Rejects casual chat and abbreviated/invalid system names (e.g. `C-N`, `B1`).
+/// For non-English messages (e.g. Cyrillic/CJK), extracts only valid system names.
+pub fn validate_and_parse(msg: &ChatMessage, map: &EveMap) -> Option<ParsedIntel> {
+    if msg.is_system || msg.text.trim().is_empty() {
+        return None;
+    }
+    let raw_tokens: Vec<&str> = msg.text.split_whitespace().map(clean_token).filter(|t| !t.is_empty()).collect();
+    if raw_tokens.is_empty() {
+        return None;
+    }
+
+    let mut consumed = vec![false; raw_tokens.len()];
+    let mut systems = Vec::new();
+    let mut system_ids = Vec::new();
+
+    let mut i = 0;
+    while i < raw_tokens.len() {
+        let mut matched = false;
+        for width in (1..=3).rev() {
+            if i + width > raw_tokens.len() {
+                continue;
+            }
+            let phrase = raw_tokens[i..i + width].join(" ");
+            if let Some(id) = map.lookup_exact(&phrase) {
+                if !system_ids.contains(&id) {
+                    system_ids.push(id);
+                    systems.push(map.name(id).to_string());
+                }
+                for flag in &mut consumed[i..i + width] {
+                    *flag = true;
+                }
+                i += width;
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            i += 1;
+        }
+    }
+
+    if system_ids.is_empty() {
+        return None;
+    }
+
+    let foreign_only = has_non_latin_script(&msg.text);
+    if foreign_only {
+        return Some(ParsedIntel {
+            systems,
+            system_ids,
+            foreign_only: true,
+            tags: Vec::new(),
+            ships: Vec::new(),
+            pilots: Vec::new(),
+        });
+    }
+
+    let mut tags = Vec::new();
+    let mut ships = Vec::new();
+    let mut pilots = Vec::new();
+    for (idx, tok) in raw_tokens.iter().enumerate() {
+        if consumed[idx] {
+            continue;
+        }
+        let lower = tok.to_ascii_lowercase();
+        if is_count_or_spike_tag(tok) {
+            tags.push(tok.to_string());
+        } else if is_ship_type(&lower) {
+            ships.push(tok.to_string());
+        } else if !is_filler_word(&lower) {
+            pilots.push(tok.to_string());
+        }
+    }
+
+    Some(ParsedIntel {
+        systems,
+        system_ids,
+        foreign_only: false,
+        tags,
+        ships,
+        pilots,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -210,5 +406,43 @@ mod tests {
         assert_eq!(intel.sender, "max9892");
         assert_eq!(intel.text, "NightsongzZ  4HS-CR sabre");
         assert!(should_alert(&intel, DEFAULT_IGNORE_WORDS));
+    }
+
+    #[test]
+    fn validates_exact_systems_rejects_chatter_and_handles_foreign_text() {
+        let map = EveMap::global();
+
+        let local = parse_line("\u{FEFF}[ 2026.11.25 14:43:43 ] EVE System > Channel changed to Local : NY6-FH\r\n").unwrap();
+        assert_eq!(parse_local_system_change(&local).as_deref(), Some("NY6-FH"));
+
+        let short = parse_line("\u{FEFF}[ 2026.11.25 14:40:00 ] pilot1 > B1 spike\r\n").unwrap();
+        assert_eq!(validate_and_parse(&short, map), None);
+
+        let abbr = parse_line("\u{FEFF}[ 2026.11.25 14:40:01 ] pilot1 > C-N +10\r\n").unwrap();
+        assert_eq!(validate_and_parse(&abbr, map), None);
+
+        let chat = parse_line("\u{FEFF}[ 2026.11.25 14:40:02 ] pilot1 > anyone have ammo?\r\n").unwrap();
+        assert_eq!(validate_and_parse(&chat, map), None);
+
+        let valid = parse_line("\u{FEFF}[ 2026.11.25 14:40:03 ] pilot1 > B17O-R spike +10 NightsongzZ sabre\r\n").unwrap();
+        let parsed = validate_and_parse(&valid, map).unwrap();
+        assert_eq!(parsed.systems, vec!["B17O-R"]);
+        assert!(!parsed.foreign_only);
+        assert_eq!(parsed.tags, vec!["spike", "+10"]);
+        assert_eq!(parsed.ships, vec!["sabre"]);
+        assert_eq!(parsed.pilots, vec!["NightsongzZ"]);
+
+        let ru = parse_line("\u{FEFF}[ 2026.11.25 14:40:04 ] pilot2 > 4HS-CR сабра +5\r\n").unwrap();
+        let parsed_ru = validate_and_parse(&ru, map).unwrap();
+        assert_eq!(parsed_ru.systems, vec!["4HS-CR"]);
+        assert!(parsed_ru.foreign_only);
+        assert!(parsed_ru.ships.is_empty());
+        assert!(parsed_ru.tags.is_empty());
+
+        let zh = parse_line("\u{FEFF}[ 2026.11.25 14:40:05 ] pilot3 > KVN-36 有敌人 10+\r\n").unwrap();
+        let parsed_zh = validate_and_parse(&zh, map).unwrap();
+        assert_eq!(parsed_zh.systems, vec!["KVN-36"]);
+        assert!(parsed_zh.foreign_only);
+        assert!(parsed_zh.ships.is_empty());
     }
 }

@@ -4,7 +4,8 @@
 //! - Left column: compact EVE SSO button (public data mode in Phase 1), manual
 //!   intel channel name input, matched `.txt` status, and Alarm Settings button
 //!   (opens Advanced Settings -> EVE Intel).
-//! - Right column: scrollable live intel feed from the matched chatlog.
+//! - Right column: `LIVE INTEL FEED` header with `• N active` client indicator
+//!   and validated proximity-aware intel messages.
 
 use crate::commands::{Command, EveIntelCmd};
 use crate::gfx::{TextStyle, Weight};
@@ -12,7 +13,6 @@ use crate::icons::Icon;
 use crate::settings_window::Section;
 use crate::state::AppState;
 use crate::ui::{wid, PillStyle, Ui, PILL_GAP, PILL_SMALL};
-use poni_core::eve_intel::should_alert;
 use poni_core::geom::{palette, Color, Point, Rect};
 
 const HEIGHT: f32 = 256.0;
@@ -107,30 +107,31 @@ fn draw_right(ui: &mut Ui, st: &mut AppState, r: Rect, accent: Color) {
     let inner = Rect::new(r.x + pad, r.y + 8.0, (r.w - 2.0 * pad).max(0.0), (r.h - 16.0).max(0.0));
     ui.c.text(
         "LIVE INTEL FEED",
-        Rect::new(inner.x, inner.y, inner.w * 0.55, 16.0),
+        Rect::new(inner.x, inner.y, inner.w * 0.58, 16.0),
         &TextStyle::caption().weight(Weight::Semibold).color(palette::TEXT_DIM),
     );
-    if let Some(listener) = &st.eve_intel.listener {
-        ui.c.text(
-            listener,
-            Rect::new(inner.x + inner.w * 0.45, inner.y, inner.w * 0.55, 16.0),
-            &TextStyle::caption().right().color(palette::TEXT_DIM),
-        );
-    }
+    let active_n = st.eve_intel.active_clients;
+    let active_label = format!("• {active_n} active");
+    let active_color = if active_n > 0 { palette::GREEN } else { palette::TEXT_DIM };
+    ui.c.text(
+        &active_label,
+        Rect::new(inner.x + inner.w * 0.50, inner.y, inner.w * 0.50, 16.0),
+        &TextStyle::caption().right().tabular().color(active_color),
+    );
 
     let list_r = Rect::new(inner.x, inner.y + 22.0, inner.w, (inner.h - 22.0).max(0.0));
-    let msgs = &st.eve_intel.messages;
-    if msgs.is_empty() {
+    let items = &st.eve_intel.items;
+    if items.is_empty() {
         let hint = if st.settings.eve_intel.channel.trim().is_empty() {
             "No channel selected"
         } else {
-            "Waiting for intel lines…"
+            "Waiting for validated intel…"
         };
         ui.c.text(hint, list_r, &TextStyle::footnote().center().color(palette::TEXT_DIM));
         return;
     }
 
-    let total_h = msgs.len() as f32 * MSG_ROW_H;
+    let total_h = items.len() as f32 * MSG_ROW_H;
     let max_scroll = (total_h - list_r.h).max(0.0);
     let wheel = ui.wheel_in(list_r);
     if wheel != 0.0 {
@@ -141,30 +142,45 @@ fn draw_right(ui: &mut Ui, st: &mut AppState, r: Rect, accent: Color) {
     }
 
     ui.c.clip(list_r);
-    let ignore = &st.settings.eve_intel.ignore_words;
-    // Show newest intel messages first.
-    for (idx, msg) in msgs.iter().rev().enumerate() {
+    let max_jumps = st.settings.eve_intel.alert_jumps;
+    // Show newest validated intel first.
+    for (idx, item) in items.iter().rev().enumerate() {
         let y = list_r.y + idx as f32 * MSG_ROW_H - st.ui.eve_feed_scroll;
         if y + MSG_ROW_H < list_r.y || y > list_r.bottom() {
             continue;
         }
-        let alert = should_alert(msg, ignore);
-        let dot_color = if alert { accent } else { palette::TEXT_DIM };
+        let in_radius = item.min_jumps.is_some_and(|j| j <= max_jumps);
+        let active_alert = !item.ignored && in_radius;
+        let dot_color = if active_alert { palette::RED } else if !item.ignored { accent } else { palette::TEXT_DIM };
         ui.c.fill_circle(Point::new(list_r.x + 5.0, y + 8.0), 3.0, dot_color);
 
         let time_w = 54.0;
-        ui.c.text(&msg.time_short, Rect::new(list_r.x + 13.0, y, time_w, 15.0), &TextStyle::caption().tabular().color(palette::TEXT_DIM));
-        let sender_x = list_r.x + 13.0 + time_w + 4.0;
-        let sender_w = (list_r.right() - sender_x).max(0.0);
+        ui.c.text(&item.time_short, Rect::new(list_r.x + 13.0, y, time_w, 15.0), &TextStyle::caption().tabular().color(palette::TEXT_DIM));
+
+        let jump_badge = match item.min_jumps {
+            Some(j) => format!("{j}j"),
+            None if st.eve_intel.active_clients > 0 => ">15j".to_string(),
+            None => "--".to_string(),
+        };
+        let badge_w = 34.0;
+        let badge_color = if active_alert { palette::RED } else { palette::TEXT_DIM };
         ui.c.text(
-            &msg.sender,
+            &jump_badge,
+            Rect::new(list_r.right() - badge_w, y, badge_w, 15.0),
+            &TextStyle::caption().right().tabular().weight(Weight::Semibold).color(badge_color),
+        );
+
+        let sender_x = list_r.x + 13.0 + time_w + 4.0;
+        let sender_w = (list_r.right() - badge_w - sender_x - 4.0).max(0.0);
+        ui.c.text(
+            &item.sender,
             Rect::new(sender_x, y, sender_w, 15.0),
-            &TextStyle::caption().weight(Weight::Semibold).color(if alert { palette::TEXT } else { palette::TEXT_DIM }),
+            &TextStyle::caption().weight(Weight::Semibold).color(if !item.ignored { palette::TEXT } else { palette::TEXT_DIM }),
         );
         ui.c.text(
-            &msg.text,
+            &item.parsed.summary(),
             Rect::new(list_r.x + 13.0, y + 15.0, (list_r.w - 13.0).max(0.0), 16.0),
-            &TextStyle::footnote().color(if alert { palette::TEXT } else { palette::TEXT_DIM }),
+            &TextStyle::footnote().color(if active_alert { palette::TEXT } else { palette::TEXT_DIM }),
         );
     }
     ui.c.unclip();

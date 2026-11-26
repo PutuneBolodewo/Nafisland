@@ -168,6 +168,8 @@ pub struct EveIntelSettings {
     pub ignore_words: String,
     /// Show a pop-up notice on the collapsed island when intel triggers.
     pub popup_notice: bool,
+    /// Alert radius in stargate jumps (`0..=5`) from any active character's location.
+    pub alert_jumps: u8,
 }
 
 impl Default for EveIntelSettings {
@@ -180,6 +182,7 @@ impl Default for EveIntelSettings {
             cooldown_s: 5,
             ignore_words: crate::eve_intel::DEFAULT_IGNORE_WORDS.into(),
             popup_notice: true,
+            alert_jumps: 5,
         }
     }
 }
@@ -443,6 +446,7 @@ impl Settings {
         p.long_every = p.long_every.min(12);
         self.prayer.remind_before_min = self.prayer.remind_before_min.min(60);
         self.eve_intel.cooldown_s = self.eve_intel.cooldown_s.min(300);
+        self.eve_intel.alert_jumps = self.eve_intel.alert_jumps.min(5);
         self
     }
 }

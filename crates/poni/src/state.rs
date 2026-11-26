@@ -387,10 +387,10 @@ pub struct PageUiState {
 /// Runtime state for the EVE Online Intel Tool add-on (never persisted).
 #[derive(Clone, Debug, Default)]
 pub struct EveIntelState {
+    pub active_clients: usize,
     pub filename: Option<String>,
-    pub listener: Option<String>,
     pub error: Option<String>,
-    pub messages: Vec<poni_core::eve_intel::ChatMessage>,
+    pub items: Vec<crate::services::eve_intel::IntelItem>,
     pub last_alarm_at: f64,
     pub sso_note: Option<String>,
 }

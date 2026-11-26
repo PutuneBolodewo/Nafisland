@@ -1,24 +1,29 @@
 //! EVE Online Intel Tool background service:
-//! - Watches the user's `Chatlogs` folder using `FindFirstChangeNotificationW`
-//!   + an event-driven wake handle (0% CPU while off/idle).
-//! - Tail-reads UTF-16LE chatlogs safely while EVE Online keeps the file open.
+//! - Counts running `exefile.exe` clients via ToolHelp32 (`• N active`).
+//! - Maps running clients to active `Local_*.txt` logs per `CharacterID` and
+//!   tracks each character's current k-space solar system.
+//! - Monitors **one** active intel channel file owned by an online character,
+//!   failing over automatically to another online character if one logs off.
+//! - Validates incoming lines against `EveMap` (rejecting casual chat and
+//!   abbreviated systems like `C-N` or `B1`) and computes stargate jump distance.
 //! - Plays custom alarm audio via WinRT `MediaPlayer` without creating a
 //!   Windows media session (`CommandManager.SetIsEnabled(false)`).
-//! - Opens native Windows file/folder pickers on an STA worker thread so the UI
-//!   thread never blocks.
 
 use crate::commands::Sound;
 use crate::events::{AppEvent, EventSink};
-use poni_core::eve_intel::{self, ChatMessage};
+use poni_core::eve_intel::{self, ChatMessage, ParsedIntel, SessionFile};
+use poni_core::eve_map::EveMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use windows::core::{w, HSTRING};
 use windows::Foundation::{TypedEventHandler, Uri};
 use windows::Media::Core::MediaSource;
 use windows::Media::Playback::MediaPlayer;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
+use windows::Win32::Foundation::{CloseHandle, FILETIME, HANDLE, INVALID_HANDLE_VALUE, WAIT_OBJECT_0};
 use windows::Win32::Storage::FileSystem::{
     FindCloseChangeNotification, FindFirstChangeNotificationW, FindNextChangeNotification,
     FILE_NOTIFY_CHANGE_FILE_NAME, FILE_NOTIFY_CHANGE_LAST_WRITE, FILE_NOTIFY_CHANGE_SIZE,
@@ -26,7 +31,12 @@ use windows::Win32::Storage::FileSystem::{
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED,
 };
-use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForMultipleObjects, INFINITE};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+use windows::Win32::System::Threading::{
+    CreateEventW, GetProcessTimes, OpenProcess, SetEvent, WaitForMultipleObjects, INFINITE, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
     FileOpenDialog, IFileOpenDialog, IShellItem, SHCreateItemFromParsingName, FOS_FILEMUSTEXIST, FOS_PATHMUSTEXIST,
@@ -35,24 +45,37 @@ use windows::Win32::UI::Shell::{
 
 const INITIAL_HISTORY_BYTES: u64 = 16 * 1024;
 const ACTIVE_FALLBACK_MS: u32 = 1500;
-const IDLE_RETRY_MS: u32 = 5000;
+const IDLE_RETRY_MS: u32 = 3000;
+const MAX_TRACKED_JUMPS: u8 = 15;
+const UNIX_EPOCH_IN_FILETIME_100NS: u64 = 116_444_736_000_000_000;
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Watch {
     pub active: bool,
     pub channel: String,
     pub dir: PathBuf,
+    pub ignore_words: String,
+}
+
+#[derive(Clone, Debug)]
+pub struct IntelItem {
+    pub time_short: String,
+    pub sender: String,
+    pub parsed: ParsedIntel,
+    pub min_jumps: Option<u8>,
+    pub ignored: bool,
 }
 
 #[derive(Clone, Debug)]
 pub enum EveIntelEvent {
     Session {
+        active_clients: usize,
         filename: Option<String>,
-        listener: Option<String>,
-        history: Vec<ChatMessage>,
+        history: Vec<IntelItem>,
         error: Option<String>,
     },
-    Messages(Vec<ChatMessage>),
+    ActiveClients(usize),
+    Intel(Vec<IntelItem>),
     PickedSound(String),
     PickedDir(String),
 }
@@ -107,46 +130,73 @@ impl Drop for EveIntelService {
     }
 }
 
-struct TailState {
-    channel: String,
-    dir: PathBuf,
-    file_path: Option<PathBuf>,
-    filename: Option<String>,
+struct LocalTail {
+    filename: String,
     offset: u64,
     carry: Option<u8>,
     pending: String,
+    system_id: Option<u16>,
+}
+
+struct TailState {
+    channel: String,
+    dir: PathBuf,
+    ignore_words: String,
+    active_clients: usize,
+    locals: HashMap<String, LocalTail>,
+    intel_file: Option<PathBuf>,
+    intel_filename: Option<String>,
+    intel_char_id: Option<String>,
+    offset: u64,
+    carry: Option<u8>,
+    pending: String,
+    last_error: Option<String>,
 }
 
 impl TailState {
-    fn reset(&mut self, channel: String, dir: PathBuf) {
+    fn new() -> Self {
+        Self {
+            channel: String::new(),
+            dir: PathBuf::new(),
+            ignore_words: String::new(),
+            active_clients: usize::MAX,
+            locals: HashMap::new(),
+            intel_file: None,
+            intel_filename: None,
+            intel_char_id: None,
+            offset: 0,
+            carry: None,
+            pending: String::new(),
+            last_error: None,
+        }
+    }
+
+    fn reset(&mut self, channel: String, dir: PathBuf, ignore_words: String) {
         self.channel = channel;
         self.dir = dir;
-        self.file_path = None;
-        self.filename = None;
+        self.ignore_words = ignore_words;
+        self.active_clients = usize::MAX;
+        self.locals.clear();
+        self.intel_file = None;
+        self.intel_filename = None;
+        self.intel_char_id = None;
         self.offset = 0;
         self.carry = None;
         self.pending.clear();
+        self.last_error = None;
     }
 }
 
 fn worker(sink: EventSink, watch: Arc<Mutex<Watch>>, wake: HANDLE) {
-    let mut state = TailState {
-        channel: String::new(),
-        dir: PathBuf::new(),
-        file_path: None,
-        filename: None,
-        offset: 0,
-        carry: None,
-        pending: String::new(),
-    };
+    let mut state = TailState::new();
     let mut watched_dir: Option<PathBuf> = None;
     let mut dir_notify: Option<HANDLE> = None;
 
     loop {
         let w = watch.lock().unwrap().clone();
         if !w.active || w.channel.trim().is_empty() {
-            if state.file_path.is_some() || !state.channel.is_empty() {
-                state.reset(String::new(), PathBuf::new());
+            if state.intel_file.is_some() || !state.channel.is_empty() {
+                state.reset(String::new(), PathBuf::new(), String::new());
             }
             close_dir_notify(&mut dir_notify, &mut watched_dir);
             unsafe {
@@ -156,8 +206,10 @@ fn worker(sink: EventSink, watch: Arc<Mutex<Watch>>, wake: HANDLE) {
         }
 
         if state.channel != w.channel || state.dir != w.dir {
-            state.reset(w.channel.clone(), w.dir.clone());
+            state.reset(w.channel.clone(), w.dir.clone(), w.ignore_words.clone());
             close_dir_notify(&mut dir_notify, &mut watched_dir);
+        } else {
+            state.ignore_words = w.ignore_words.clone();
         }
 
         if watched_dir.as_ref() != Some(&w.dir) {
@@ -183,10 +235,10 @@ fn worker(sink: EventSink, watch: Arc<Mutex<Watch>>, wake: HANDLE) {
         poll_chatlogs(&sink, &mut state);
 
         let timeout = if dir_notify.is_some() {
-            if state.file_path.is_some() {
+            if state.active_clients > 0 || state.intel_file.is_some() {
                 ACTIVE_FALLBACK_MS
             } else {
-                INFINITE
+                IDLE_RETRY_MS
             }
         } else {
             IDLE_RETRY_MS
@@ -215,73 +267,196 @@ fn close_dir_notify(dir_notify: &mut Option<HANDLE>, watched_dir: &mut Option<Pa
     *watched_dir = None;
 }
 
-fn poll_chatlogs(sink: &EventSink, st: &mut TailState) {
-    if !st.dir.is_dir() {
-        if st.file_path.is_some() || st.filename.is_some() {
-            st.file_path = None;
-            st.filename = None;
+struct RunningClients {
+    count: usize,
+    earliest_start: Option<SystemTime>,
+}
+
+fn filetime_to_system(ft: FILETIME) -> Option<SystemTime> {
+    let ticks = ((ft.dwHighDateTime as u64) << 32) | (ft.dwLowDateTime as u64);
+    if ticks < UNIX_EPOCH_IN_FILETIME_100NS {
+        return None;
+    }
+    let delta_ns = (ticks - UNIX_EPOCH_IN_FILETIME_100NS) * 100;
+    Some(UNIX_EPOCH + Duration::from_nanos(delta_ns))
+}
+
+fn running_eve_clients() -> RunningClients {
+    let mut count = 0usize;
+    let mut earliest_start: Option<SystemTime> = None;
+    unsafe {
+        let Ok(snap) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) else {
+            return RunningClients { count: 0, earliest_start: None };
+        };
+        let mut pe = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        if Process32FirstW(snap, &mut pe).is_ok() {
+            loop {
+                let end = pe.szExeFile.iter().position(|&c| c == 0).unwrap_or(pe.szExeFile.len());
+                let exe = String::from_utf16_lossy(&pe.szExeFile[..end]);
+                if exe.eq_ignore_ascii_case("exefile.exe") {
+                    count += 1;
+                    if let Ok(proc_h) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pe.th32ProcessID) {
+                        let (mut create, mut exit, mut kernel, mut user) = Default::default();
+                        if GetProcessTimes(proc_h, &mut create, &mut exit, &mut kernel, &mut user).is_ok() {
+                            if let Some(t) = filetime_to_system(create) {
+                                earliest_start = Some(match earliest_start {
+                                    Some(prev) => prev.min(t),
+                                    None => t,
+                                });
+                            }
+                        }
+                        let _ = CloseHandle(proc_h);
+                    }
+                }
+                if Process32NextW(snap, &mut pe).is_err() {
+                    break;
+                }
+            }
         }
-        sink.send(AppEvent::EveIntel(EveIntelEvent::Session {
-            filename: None,
-            listener: None,
-            history: Vec::new(),
-            error: Some(format!("Folder not found: {}", st.dir.display())),
-        }));
+        let _ = CloseHandle(snap);
+    }
+    RunningClients { count, earliest_start }
+}
+
+fn poll_chatlogs(sink: &EventSink, st: &mut TailState) {
+    let clients = running_eve_clients();
+    let map = EveMap::global();
+
+    if !st.dir.is_dir() {
+        let err = format!("Folder not found: {}", st.dir.display());
+        if st.last_error.as_deref() != Some(&err) || st.active_clients != clients.count {
+            st.intel_file = None;
+            st.intel_filename = None;
+            st.intel_char_id = None;
+            st.locals.clear();
+            st.active_clients = clients.count;
+            st.last_error = Some(err.clone());
+            sink.send(AppEvent::EveIntel(EveIntelEvent::Session {
+                active_clients: clients.count,
+                filename: None,
+                history: Vec::new(),
+                error: Some(err),
+            }));
+        }
         return;
     }
 
-    let entries = match fs::read_dir(&st.dir) {
-        Ok(rd) => rd,
-        Err(e) => {
-            sink.send(AppEvent::EveIntel(EveIntelEvent::Session {
-                filename: None,
-                listener: None,
-                history: Vec::new(),
-                error: Some(format!("Cannot read folder: {e}")),
-            }));
-            return;
-        }
+    let Ok(entries) = fs::read_dir(&st.dir) else {
+        return;
     };
 
-    let names: Vec<String> = entries
-        .filter_map(|e| e.ok())
-        .filter_map(|e| e.file_name().into_string().ok())
-        .collect();
+    let mut local_by_char: HashMap<String, (SessionFile, SystemTime)> = HashMap::new();
+    let mut intel_sessions: Vec<(SessionFile, SystemTime)> = Vec::new();
+    let cutoff = clients
+        .earliest_start
+        .map(|t| t.checked_sub(Duration::from_secs(15)).unwrap_or(UNIX_EPOCH));
 
-    let picked = eve_intel::pick_latest_session(names.iter().map(String::as_str), &st.channel);
-    let Some(session) = picked else {
-        if st.file_path.is_some() || st.filename.is_none() {
-            st.file_path = None;
-            st.filename = None;
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else { continue };
+        let Some(sf) = eve_intel::parse_session_filename(&name) else { continue };
+        let modified = entry.metadata().and_then(|m| m.modified()).unwrap_or(UNIX_EPOCH);
+
+        if sf.channel_name.eq_ignore_ascii_case("Local") {
+            if let Some(cut) = cutoff {
+                if modified < cut {
+                    continue;
+                }
+            }
+            match local_by_char.get(&sf.char_id) {
+                Some((cur, _)) if cur.stamp >= sf.stamp => {}
+                _ => {
+                    local_by_char.insert(sf.char_id.clone(), (sf, modified));
+                }
+            }
+        } else if eve_intel::channel_matches(&sf.channel_name, &st.channel) {
+            intel_sessions.push((sf, modified));
+        }
+    }
+
+    // Map active `exefile.exe` processes to the newest unique `CharacterID` `Local` logs.
+    let mut active_locals: Vec<(SessionFile, SystemTime)> = if clients.count == 0 {
+        Vec::new()
+    } else {
+        let mut v: Vec<_> = local_by_char.into_values().collect();
+        v.sort_by(|a, b| b.0.stamp.cmp(&a.0.stamp).then_with(|| b.1.cmp(&a.1)));
+        v.truncate(clients.count);
+        v
+    };
+
+    let active_char_ids: HashSet<String> = active_locals.iter().map(|(sf, _)| sf.char_id.clone()).collect();
+    st.locals.retain(|cid, _| active_char_ids.contains(cid));
+
+    for (sf, _) in active_locals.drain(..) {
+        update_local_tail(&st.dir, &sf, &mut st.locals, map);
+    }
+
+    let active_system_ids: Vec<u16> = st.locals.values().filter_map(|l| l.system_id).collect();
+
+    if clients.count == 0 {
+        if st.active_clients != 0 || st.intel_file.is_some() {
+            st.active_clients = 0;
+            st.intel_file = None;
+            st.intel_filename = None;
+            st.intel_char_id = None;
+            st.last_error = Some("EVE Online not running".into());
             sink.send(AppEvent::EveIntel(EveIntelEvent::Session {
+                active_clients: 0,
                 filename: None,
-                listener: None,
                 history: Vec::new(),
-                error: Some(format!("Waiting for \"{}_*.txt\"", st.channel.trim())),
+                error: st.last_error.clone(),
+            }));
+        }
+        return;
+    }
+
+    if st.active_clients != clients.count {
+        st.active_clients = clients.count;
+        sink.send(AppEvent::EveIntel(EveIntelEvent::ActiveClients(clients.count)));
+    }
+
+    // Pick 1 active intel file from an online character (automatic failover when one goes offline).
+    let picked = pick_online_intel_session(&intel_sessions, &active_char_ids, st.intel_char_id.as_deref());
+    let Some(session) = picked else {
+        let err = format!("Waiting for \"{}_*.txt\"", st.channel.trim());
+        if st.intel_file.is_some() || st.last_error.as_deref() != Some(&err) {
+            st.intel_file = None;
+            st.intel_filename = None;
+            st.intel_char_id = None;
+            st.last_error = Some(err.clone());
+            sink.send(AppEvent::EveIntel(EveIntelEvent::Session {
+                active_clients: clients.count,
+                filename: None,
+                history: Vec::new(),
+                error: Some(err),
             }));
         }
         return;
     };
 
-    let switched = st.filename.as_deref() != Some(&session.filename);
+    let switched = st.intel_filename.as_deref() != Some(&session.filename);
     if switched {
         let path = st.dir.join(&session.filename);
-        let (listener, history, offset, carry) = read_initial_tail(&path);
-        st.file_path = Some(path);
-        st.filename = Some(session.filename.clone());
+        let (history, offset, carry) = read_initial_intel_tail(&path, map, &active_system_ids, &st.ignore_words);
+        st.intel_file = Some(path);
+        st.intel_filename = Some(session.filename.clone());
+        st.intel_char_id = Some(session.char_id);
         st.offset = offset;
         st.carry = carry;
         st.pending.clear();
+        st.last_error = None;
         sink.send(AppEvent::EveIntel(EveIntelEvent::Session {
+            active_clients: clients.count,
             filename: Some(session.filename),
-            listener,
             history,
             error: None,
         }));
         return;
     }
 
-    let Some(path) = st.file_path.as_ref() else { return };
+    let Some(path) = st.intel_file.as_ref() else { return };
     let Ok(mut file) = File::open(path) else { return };
     let Ok(meta) = file.metadata() else { return };
     let len = meta.len();
@@ -299,34 +474,146 @@ fn poll_chatlogs(sink: &EventSink, st: &mut TailState) {
     let decoded = eve_intel::decode_utf16le_chunk(&buf, &mut st.carry);
     st.pending.push_str(&decoded);
 
-    let mut msgs = Vec::new();
+    let mut items = Vec::new();
     while let Some(pos) = st.pending.find('\n') {
         let line: String = st.pending.drain(..=pos).collect();
-        if let Some(m) = eve_intel::parse_line(&line) {
-            msgs.push(m);
+        if let Some(msg) = eve_intel::parse_line(&line) {
+            if let Some(item) = to_intel_item(&msg, map, &active_system_ids, &st.ignore_words) {
+                items.push(item);
+            }
         }
     }
-    if !msgs.is_empty() {
-        sink.send(AppEvent::EveIntel(EveIntelEvent::Messages(msgs)));
+    if !items.is_empty() {
+        sink.send(AppEvent::EveIntel(EveIntelEvent::Intel(items)));
     }
 }
 
-fn read_initial_tail(path: &Path) -> (Option<String>, Vec<ChatMessage>, u64, Option<u8>) {
+fn pick_online_intel_session(
+    sessions: &[(SessionFile, SystemTime)],
+    active_char_ids: &HashSet<String>,
+    current_char_id: Option<&str>,
+) -> Option<SessionFile> {
+    if sessions.is_empty() {
+        return None;
+    }
+    // Keep watching current online character's newest file if still active.
+    if let Some(cid) = current_char_id {
+        if active_char_ids.contains(cid) {
+            if let Some((sf, _)) = sessions
+                .iter()
+                .filter(|(sf, _)| sf.char_id == cid)
+                .max_by(|a, b| a.0.stamp.cmp(&b.0.stamp).then_with(|| a.1.cmp(&b.1)))
+            {
+                return Some(sf.clone());
+            }
+        }
+    }
+    // Failover: pick newest intel file belonging to any currently online character.
+    if let Some((sf, _)) = sessions
+        .iter()
+        .filter(|(sf, _)| active_char_ids.contains(&sf.char_id))
+        .max_by(|a, b| a.0.stamp.cmp(&b.0.stamp).then_with(|| a.1.cmp(&b.1)))
+    {
+        return Some(sf.clone());
+    }
+    // Fallback if Local hasn't been created yet while client is loading into space.
+    sessions
+        .iter()
+        .max_by(|a, b| a.0.stamp.cmp(&b.0.stamp).then_with(|| a.1.cmp(&b.1)))
+        .map(|(sf, _)| sf.clone())
+}
+
+fn update_local_tail(dir: &Path, sf: &SessionFile, locals: &mut HashMap<String, LocalTail>, map: &EveMap) {
+    let path = dir.join(&sf.filename);
+    let Ok(mut file) = File::open(&path) else { return };
+    let Ok(meta) = file.metadata() else { return };
+    let len = meta.len();
+
+    let need_init = match locals.get(&sf.char_id) {
+        Some(cur) => cur.filename != sf.filename,
+        None => true,
+    };
+
+    if need_init {
+        let mut buf = Vec::with_capacity(len.min(256 * 1024) as usize);
+        let read_len = file.read_to_end(&mut buf).unwrap_or(0);
+        let mut carry = None;
+        let text = eve_intel::decode_utf16le_chunk(&buf[..read_len], &mut carry);
+        let mut system_id = None;
+        for line in text.lines() {
+            if let Some(msg) = eve_intel::parse_line(line) {
+                if let Some(sys) = eve_intel::parse_local_system_change(&msg) {
+                    if let Some(id) = map.lookup_exact(&sys) {
+                        system_id = Some(id);
+                    }
+                }
+            }
+        }
+        locals.insert(
+            sf.char_id.clone(),
+            LocalTail {
+                filename: sf.filename.clone(),
+                offset: read_len as u64,
+                carry,
+                pending: String::new(),
+                system_id,
+            },
+        );
+        return;
+    }
+
+    let Some(lt) = locals.get_mut(&sf.char_id) else { return };
+    if len <= lt.offset {
+        return;
+    }
+    if file.seek(SeekFrom::Start(lt.offset)).is_err() {
+        return;
+    }
+    let mut buf = Vec::with_capacity((len - lt.offset).min(64 * 1024) as usize);
+    if file.read_to_end(&mut buf).is_err() || buf.is_empty() {
+        return;
+    }
+    lt.offset += buf.len() as u64;
+    let decoded = eve_intel::decode_utf16le_chunk(&buf, &mut lt.carry);
+    lt.pending.push_str(&decoded);
+    while let Some(pos) = lt.pending.find('\n') {
+        let line: String = lt.pending.drain(..=pos).collect();
+        if let Some(msg) = eve_intel::parse_line(&line) {
+            if let Some(sys) = eve_intel::parse_local_system_change(&msg) {
+                if let Some(id) = map.lookup_exact(&sys) {
+                    lt.system_id = Some(id);
+                }
+            }
+        }
+    }
+}
+
+fn to_intel_item(msg: &ChatMessage, map: &EveMap, active_system_ids: &[u16], ignore_words: &str) -> Option<IntelItem> {
+    let parsed = eve_intel::validate_and_parse(msg, map)?;
+    let min_jumps = map.nearest_within(active_system_ids, &parsed.system_ids, MAX_TRACKED_JUMPS);
+    let ignored = !eve_intel::should_alert(msg, ignore_words);
+    Some(IntelItem {
+        time_short: msg.time_short.clone(),
+        sender: msg.sender.clone(),
+        parsed,
+        min_jumps,
+        ignored,
+    })
+}
+
+fn read_initial_intel_tail(
+    path: &Path,
+    map: &EveMap,
+    active_system_ids: &[u16],
+    ignore_words: &str,
+) -> (Vec<IntelItem>, u64, Option<u8>) {
     let Ok(mut file) = File::open(path) else {
-        return (None, Vec::new(), 0, None);
+        return (Vec::new(), 0, None);
     };
     let len = file.metadata().map(|m| m.len()).unwrap_or(0);
-    // Read header (first 2 KB) for Listener metadata.
-    let mut head_buf = vec![0u8; (len.min(2048)) as usize];
-    let head_read = file.read(&mut head_buf).unwrap_or(0);
-    let mut head_carry = None;
-    let head_text = eve_intel::decode_utf16le_chunk(&head_buf[..head_read], &mut head_carry);
-    let listener = eve_intel::parse_header(&head_text).and_then(|h| (!h.listener.is_empty()).then_some(h.listener));
-
-    // Read up to last 16 KB (aligned to even byte boundary) for recent feed lines.
     let start = len.saturating_sub(INITIAL_HISTORY_BYTES) & !1;
     if file.seek(SeekFrom::Start(start)).is_err() {
-        return (listener, Vec::new(), len, None);
+        return (Vec::new(), len, None);
     }
     let mut tail = Vec::new();
     let read_len = file.read_to_end(&mut tail).unwrap_or(0);
@@ -334,11 +621,16 @@ fn read_initial_tail(path: &Path) -> (Option<String>, Vec<ChatMessage>, u64, Opt
     let text = eve_intel::decode_utf16le_chunk(&tail[..read_len], &mut carry);
     let lines: Vec<&str> = text.lines().collect();
     let skip_first = usize::from(start > 0 && !lines.is_empty());
-    let mut history: Vec<ChatMessage> = lines.into_iter().skip(skip_first).filter_map(eve_intel::parse_line).filter(|m| !m.is_system).collect();
+    let mut history: Vec<IntelItem> = lines
+        .into_iter()
+        .skip(skip_first)
+        .filter_map(eve_intel::parse_line)
+        .filter_map(|m| to_intel_item(&m, map, active_system_ids, ignore_words))
+        .collect();
     if history.len() > 24 {
         history.drain(..history.len() - 24);
     }
-    (listener, history, start + read_len as u64, carry)
+    (history, start + read_len as u64, carry)
 }
 
 /// Non-media-session alarm audio player (same WinRT pattern as `AdzanPlayer`).
@@ -449,5 +741,38 @@ fn open_dialog(folder: bool, initial: Option<&str>) -> Option<String> {
             CoUninitialize();
         }
         res
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn intel_failover_switches_to_another_online_character() {
+        let sf = |name: &str, ch: &str, stamp: &str, cid: &str| {
+            (
+                SessionFile {
+                    filename: name.into(),
+                    channel_name: ch.into(),
+                    stamp: stamp.into(),
+                    char_id: cid.into(),
+                },
+                UNIX_EPOCH,
+            )
+        };
+        let sessions = vec![
+            sf("I. Ftn Intel_20261125_143805_111.txt", "I. Ftn Intel", "20261125_143805", "111"),
+            sf("I. Ftn Intel_20261125_143900_222.txt", "I. Ftn Intel", "20261125_143900", "222"),
+        ];
+        // Both online, keeping current 111.
+        let both: HashSet<String> = ["111".into(), "222".into()].into_iter().collect();
+        let kept = pick_online_intel_session(&sessions, &both, Some("111")).unwrap();
+        assert_eq!(kept.char_id, "111");
+
+        // 111 goes offline -> automatically switches to online 222.
+        let only_222: HashSet<String> = ["222".into()].into_iter().collect();
+        let failover = pick_online_intel_session(&sessions, &only_222, Some("111")).unwrap();
+        assert_eq!(failover.char_id, "222");
     }
 }

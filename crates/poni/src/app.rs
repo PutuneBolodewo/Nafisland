@@ -1946,7 +1946,12 @@ impl App {
         let ch = self.st.settings.eve_intel.channel.trim().to_string();
         let active = here && self.st.eve_intel_on() && !ch.is_empty();
         let dir = services::eve_intel::resolved_dir(self.st.settings.eve_intel.chatlogs_dir.as_deref()).unwrap_or_default();
-        let w = services::eve_intel::Watch { active, channel: ch, dir };
+        let w = services::eve_intel::Watch {
+            active,
+            channel: ch,
+            dir,
+            ignore_words: self.st.settings.eve_intel.ignore_words.clone(),
+        };
         if w == self.eve_intel_watch {
             return;
         }
@@ -1963,9 +1968,8 @@ impl App {
                 let ch = ch.trim().to_string();
                 self.st.settings.eve_intel.channel = ch.clone();
                 self.st.ui.eve_channel_input = ch;
-                self.st.eve_intel.messages.clear();
+                self.st.eve_intel.items.clear();
                 self.st.eve_intel.filename = None;
-                self.st.eve_intel.listener = None;
                 self.st.eve_intel.error = None;
                 self.save_settings();
                 self.set_eve_intel_watch();
@@ -1989,34 +1993,39 @@ impl App {
     fn on_eve_intel(&mut self, ev: services::eve_intel::EveIntelEvent, now: f64) {
         use services::eve_intel::EveIntelEvent;
         match ev {
-            EveIntelEvent::Session { filename, listener, history, error } => {
+            EveIntelEvent::Session { active_clients, filename, history, error } => {
+                self.st.eve_intel.active_clients = active_clients;
                 self.st.eve_intel.filename = filename;
-                self.st.eve_intel.listener = listener;
                 self.st.eve_intel.error = error;
-                self.st.eve_intel.messages = history;
+                self.st.eve_intel.items = history;
                 self.st.ui.eve_feed_scroll = 0.0;
             }
-            EveIntelEvent::Messages(msgs) => {
-                let ignore = self.st.settings.eve_intel.ignore_words.clone();
+            EveIntelEvent::ActiveClients(n) => {
+                self.st.eve_intel.active_clients = n;
+            }
+            EveIntelEvent::Intel(items) => {
+                let max_jumps = self.st.settings.eve_intel.alert_jumps;
                 let mut latest_alert = None;
-                for m in msgs {
-                    if poni_core::eve_intel::should_alert(&m, &ignore) {
-                        latest_alert = Some(m.clone());
+                for item in items {
+                    let in_radius = item.min_jumps.is_some_and(|j| j <= max_jumps);
+                    if !item.ignored && in_radius {
+                        latest_alert = Some(item.clone());
                     }
-                    self.st.eve_intel.messages.push(m);
+                    self.st.eve_intel.items.push(item);
                 }
-                if self.st.eve_intel.messages.len() > 60 {
-                    let drop_n = self.st.eve_intel.messages.len() - 60;
-                    self.st.eve_intel.messages.drain(..drop_n);
+                if self.st.eve_intel.items.len() > 60 {
+                    let drop_n = self.st.eve_intel.items.len() - 60;
+                    self.st.eve_intel.items.drain(..drop_n);
                 }
-                if let Some(m) = latest_alert {
+                if let Some(item) = latest_alert {
                     if self.st.settings.eve_intel.popup_notice && !self.expanded {
+                        let jump_tag = item.min_jumps.map(|j| format!(" ({j}j)")).unwrap_or_default();
                         let notice = Notice {
                             icon: Icon::Bell,
                             color: poni_core::geom::palette::RED,
-                            title: format!("EVE Intel · {}", m.sender),
+                            title: format!("EVE Intel · {}{jump_tag}", item.parsed.systems.join(", ")),
                             title_dim: self.st.settings.eve_intel.channel.clone(),
-                            subtitle: m.text,
+                            subtitle: item.parsed.summary(),
                             until: now + 8.0,
                             action: Some(NoticeAction::OpenPage(PageKind::EveIntel)),
                             inline: None,

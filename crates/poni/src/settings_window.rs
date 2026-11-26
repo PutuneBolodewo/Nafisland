@@ -329,6 +329,7 @@ pub enum Key {
     EveSoundTest,
     EveCooldown,
     EvePopup,
+    EveAlertJumps,
     EveIgnoreClr,
     SettingsFile,
     DataFolder,
@@ -667,7 +668,15 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
             alarm_rows.push(item(Key::EveCooldown, "Alarm cooldown", Some("Minimum gap between repeated sounds"), Ctl::Stepper(cooldown)));
 
             let ignore_clr = !e.ignore_words.trim().is_empty();
+            let jumps = if e.alert_jumps == 0 {
+                "0 jumps (same system)".to_string()
+            } else if e.alert_jumps == 1 {
+                "1 jump".to_string()
+            } else {
+                format!("{} jumps", e.alert_jumps)
+            };
             let alert_rows = vec![
+                item(Key::EveAlertJumps, "Detection radius", Some("Alert for reports within this many jumps of an active character"), Ctl::Stepper(jumps)),
                 switch(Key::EvePopup, "Collapsed island pop-up", Some("Show an alert banner on the closed island"), e.popup_notice),
                 switch(Key::EveIgnoreClr, "Ignore clear reports (clr)", Some("Skip alarms for messages containing clr or clear"), ignore_clr),
             ];
@@ -878,6 +887,7 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
             return;
         }
         Key::EveCooldown => s.eve_intel.cooldown_s = (s.eve_intel.cooldown_s as i32 + step * 5).clamp(0, 60) as u32,
+        Key::EveAlertJumps => s.eve_intel.alert_jumps = (s.eve_intel.alert_jumps as i32 + step).clamp(0, 5) as u8,
         Key::EvePopup => s.eve_intel.popup_notice = !s.eve_intel.popup_notice,
         Key::EveIgnoreClr => {
             s.eve_intel.ignore_words = if s.eve_intel.ignore_words.trim().is_empty() {
@@ -1956,6 +1966,12 @@ mod tests {
         assert!(sections(&st).contains(&Section::EveIntel));
         apply(&mut st, Key::EveCooldown, Act::Step(1));
         assert_eq!(st.settings.eve_intel.cooldown_s, 10);
+        apply(&mut st, Key::EveAlertJumps, Act::Step(-2));
+        assert_eq!(st.settings.eve_intel.alert_jumps, 3);
+        apply(&mut st, Key::EveAlertJumps, Act::Step(-10));
+        assert_eq!(st.settings.eve_intel.alert_jumps, 0);
+        apply(&mut st, Key::EveAlertJumps, Act::Step(10));
+        assert_eq!(st.settings.eve_intel.alert_jumps, 5);
         apply(&mut st, Key::EveIgnoreClr, Act::Toggle);
         assert!(st.settings.eve_intel.ignore_words.is_empty());
     }
