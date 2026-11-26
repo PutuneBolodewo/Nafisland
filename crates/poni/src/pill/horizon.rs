@@ -14,6 +14,11 @@ use poni_core::settings::Theme;
 /// Duration of one shooting star streak animation (seconds).
 pub const SHOOTING_STAR_DUR: f64 = 0.70;
 
+/// Whether `theme` renders the Horizon sky (notched or floating Pill).
+pub fn is_on(theme: Theme) -> bool {
+    matches!(theme, Theme::Horizon | Theme::HorizonPill)
+}
+
 /// Shooting star animation state on `AppState`.
 #[derive(Clone, Debug, Default)]
 pub struct ShootingStar {
@@ -25,7 +30,7 @@ pub struct ShootingStar {
 impl ShootingStar {
     /// Advance shooting star state at `now`. Returns `true` while animating.
     pub fn tick(&mut self, st_theme: Theme, phase: DayPhase, now: f64, paused: bool) -> bool {
-        if st_theme != Theme::Horizon || paused {
+        if !is_on(st_theme) || paused {
             self.active_from = None;
             return false;
         }
@@ -63,7 +68,7 @@ impl ShootingStar {
 
     /// Time until the next shooting star should start, if scheduled.
     pub fn wake_at(&self, theme: Theme, phase: DayPhase, paused: bool) -> Option<f64> {
-        if theme != Theme::Horizon || paused || self.active_from.is_some() {
+        if !is_on(theme) || paused || self.active_from.is_some() {
             return None;
         }
         horizon::shooting_star_interval_s(phase)?;

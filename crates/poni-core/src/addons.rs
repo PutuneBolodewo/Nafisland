@@ -375,8 +375,20 @@ pub const MEETING_NOTES: Addon = Addon {
     pro: true,
 };
 
+/// EVE Intel: monitors live EVE Online chatlog files and raises collapsed-island
+/// alerts with customizable alarm sound. Its code is built into the app.
+pub const EVE_INTEL: Addon = Addon {
+    id: "eveintel",
+    title: "EVE Intel",
+    blurb: "Monitor live EVE Online intel chatlogs with island alerts and custom alarms.",
+    mac_blurb: None,
+    tag: "",
+    files: &[],
+    pro: false,
+};
+
 /// Every add-on, in the order the Add-ons page lists them.
-pub const ALL: [&Addon; 3] = [&SYSTEM, &SCREEN_RECORDER, &IELTS];
+pub const ALL: [&Addon; 4] = [&SYSTEM, &SCREEN_RECORDER, &IELTS, &EVE_INTEL];
 
 /// Japanese readings add-on is removed in this build.
 pub fn ja_switches_on(_settings: &Settings, _wants: bool) -> bool {
@@ -477,7 +489,7 @@ mod tests {
 
     #[test]
     fn built_in_add_ons_are_off_until_switched_on() {
-        for a in [&SYSTEM, &IELTS] {
+        for a in [&SYSTEM, &IELTS, &EVE_INTEL] {
             assert!(!a.downloads() && a.size() == 0, "{}", a.id);
             assert_eq!(Addon::find(a.id), Some(a));
             assert_eq!(Status::Ready.line(a, false), "On");
@@ -573,7 +585,7 @@ mod tests {
     #[test]
     fn add_ons_are_listed_in_order_each_with_its_own_id() {
         let ids: Vec<&str> = ALL.iter().map(|a| a.id).collect();
-        assert_eq!(ids, ["system", "recorder", "ielts"]);
+        assert_eq!(ids, ["system", "recorder", "ielts", "eveintel"]);
         for (i, a) in ALL.iter().enumerate() {
             // The key in settings.json and the folder's name.
             assert!(!a.id.is_empty() && a.id.bytes().all(|b| b.is_ascii_lowercase()), "{}", a.id);

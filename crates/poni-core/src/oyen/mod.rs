@@ -1,36 +1,34 @@
-//! Oyen, the Oyenza mascot: the Oyenza mark with eyes that change with the
-//! moment, drawn flat like the logo (no fur, no mouth, no whiskers). A mood
-//! moves only the eyes, the folded ear and a little bounce, as a pure function
-//! of time, so every frame is exact and nothing animates on its own.
-//!
-//! There is one Oyen. This is a port of OyenKit (the Oyenza Mac bar's Swift
-//! port of the Oyenza app's `src/components/oyen-face.tsx`) that gives the same
-//! numbers, checked against frames OyenKit wrote (see `swift_check`). Change
-//! the app first, then OyenKit, then this, never this alone.
-//!
-//! Oyen never reacts to spending. Nothing here takes an amount, a balance or a
-//! budget, and callers must not pick a mood from one: moods follow what the app
-//! is doing (idle, reading, something just arrived, the night).
+//! Nafisland's bull mascot: the mark's dark head, curved white horns, floppy
+//! ears, peach snout, and expressive eyes that follow what the app is doing
+//! (resting, music, reading, writing, the night).
 
 pub mod geometry;
 pub mod mark;
 pub mod svg;
-#[cfg(test)]
-mod swift_check;
 
 pub use geometry::{Affine, Element, Path, PathError, Point};
 
-use geometry::{max, min, rounded_polygon, trim};
+use geometry::{max, min, trim};
 use std::f64::consts::PI;
 use std::sync::OnceLock;
 
 // The colours, as 0xRRGGBB (what `geom::Color::hex` takes).
 
-/// The head, and the ear tip's front while it stands up.
+/// Theme accent kept for the warm mascot theme.
 pub const ORANGE: u32 = 0xF0892E;
-/// The ear tip's back, which shows while it lies folded.
+/// Deep accent kept for text/fold contrast in the mascot theme.
 pub const FOLD_ORANGE: u32 = 0xC9581A;
-/// The eyes.
+/// Bull head and ear fill.
+pub const BULL_HEAD: u32 = 0x1C1C21;
+/// Subtle rim stroke so dark head/ears stay separated on black islands.
+pub const BULL_STROKE: u32 = 0x32323A;
+/// Curved white horns.
+pub const BULL_HORN: u32 = 0xF8FAFC;
+/// Horn outline.
+pub const BULL_HORN_STROKE: u32 = 0x111115;
+/// Warm peach snout.
+pub const BULL_SNOUT: u32 = 0xE89B6C;
+/// Pupils and nostrils.
 pub const INK: u32 = 0x171717;
 /// Love's hearts.
 pub const PINK: u32 = 0xFF4F8B;
@@ -234,10 +232,34 @@ pub fn head_path() -> &'static Path {
     PATH.get_or_init(|| mark_path(mark::HEAD))
 }
 
-/// The folded tip as the logo draws it.
+/// The left ear at rest (`fold = 1.0`).
 pub fn fold_path() -> &'static Path {
     static PATH: OnceLock<Path> = OnceLock::new();
     PATH.get_or_init(|| mark_path(mark::FOLD))
+}
+
+/// The right ear's outline.
+pub fn right_ear_path() -> &'static Path {
+    static PATH: OnceLock<Path> = OnceLock::new();
+    PATH.get_or_init(|| mark_path(mark::RIGHT_EAR))
+}
+
+/// Both curved white horns.
+pub fn horns_path() -> &'static Path {
+    static PATH: OnceLock<Path> = OnceLock::new();
+    PATH.get_or_init(|| mark_path(mark::HORNS))
+}
+
+/// The warm peach snout.
+pub fn snout_path() -> &'static Path {
+    static PATH: OnceLock<Path> = OnceLock::new();
+    PATH.get_or_init(|| mark_path(mark::SNOUT))
+}
+
+/// The two dark nostrils inside the snout.
+pub fn nostrils_path() -> &'static Path {
+    static PATH: OnceLock<Path> = OnceLock::new();
+    PATH.get_or_init(|| mark_path(mark::NOSTRILS))
 }
 
 fn mark_path(data: &str) -> Path {
@@ -245,9 +267,8 @@ fn mark_path(data: &str) -> Path {
     Path::from_svg(data).unwrap_or_default()
 }
 
-/// Oyen's head `t` seconds into `mood`'s loop. `eye_scale` grows the eyes for
-/// very small sizes, the way the mark's own small cut does (1 is the logo's
-/// eye, 1.19 the small cut used at 32 px and below).
+/// The bull mascot `t` seconds into `mood`'s loop. `eye_scale` grows the eyes
+/// slightly at 32 px and below.
 ///
 /// `t` is not wrapped: to play a mood over and over, pass `t % mood.loop_secs()`
 /// (except Sad, which sinks once and stays down).
@@ -272,61 +293,28 @@ pub fn frame(mood: Mood, t: f64, input: Input, eye_scale: f64) -> Frame {
 
 // The mark's numbers.
 
-const A: f64 = 52.0;
-const B: f64 = A / 1.35;
 /// The chin, below which nothing of the head shows in a peek: the point the
 /// head bounces and tilts about.
-pub const CHIN: f64 = 38.5;
-const EYE_X: f64 = 18.2;
-const EYE_Y: f64 = 6.163;
-const EYE_R: f64 = 6.76;
+pub const CHIN: f64 = 38.52;
+const EYE_X: f64 = 10.5;
+const EYE_Y: f64 = -11.5;
+const EYE_R: f64 = 6.2;
+const EAR_PIVOT: Point = Point::new(-24.0, -15.0);
 
-/// The crease the folded ear turns about.
-const CREASE1: Point = Point::new(-19.4376, -51.0062);
-const CREASE2: Point = Point::new(-42.8636, -36.3076);
-/// The left ear's tip before the fold.
-const APEX: Point = Point::new(-0.66 * A, -1.78 * B);
-
-fn tip_points() -> &'static [Point] {
-    static POINTS: OnceLock<Vec<Point>> = OnceLock::new();
-    POINTS.get_or_init(|| {
-        let corners = [
-            CREASE1.lerp(Point::new(-0.12 * A, -0.92 * B), 0.07),
-            APEX,
-            CREASE2.lerp(Point::new(-0.97 * A, -0.2 * B), 0.07),
-        ];
-        rounded_polygon(&corners, &[2.5, 6.0, 2.5], 8)
-    })
-}
-
-/// The folded ear: its tip turns about the crease.
+/// The floppy left ear: lifts upward from its attachment point as `fold` drops from 1 to 0.
 fn tip(fold: f64) -> EarTip {
     if fold >= 0.999 {
         return EarTip {
             path: fold_path().clone(),
             faces_up: false,
-            behind_head: false,
+            behind_head: true,
         };
     }
-    let c = (PI * fold).cos();
-    let dx = CREASE2.x - CREASE1.x;
-    let dy = CREASE2.y - CREASE1.y;
-    let length = dx.hypot(dy);
-    let ux = dx / length;
-    let uy = dy / length;
-    let points: Vec<Point> = tip_points()
-        .iter()
-        .map(|p| {
-            let s = (p.x - CREASE1.x) * ux + (p.y - CREASE1.y) * uy;
-            let fx = CREASE1.x + ux * s;
-            let fy = CREASE1.y + uy * s;
-            Point::new(fx + (p.x - fx) * c, fy + (p.y - fy) * c)
-        })
-        .collect();
+    let lift_deg = (1.0 - fold) * 28.0;
     EarTip {
-        path: Path::polygon(&points),
-        faces_up: c >= 0.0,
-        behind_head: fold < 0.5,
+        path: fold_path().applying(Affine::rotation_about(lift_deg, EAR_PIVOT)),
+        faces_up: fold < 0.5,
+        behind_head: true,
     }
 }
 
@@ -376,16 +364,50 @@ fn blink(t: f64, at: f64, length: f64) -> f64 {
 
 // Eye shapes.
 
-fn dot(cx: f64, cy: f64, r: f64, open: f64) -> Shape {
-    Shape::new(Path::ellipse(
-        cx,
-        cy + r * (1.0 - open) * 0.15,
-        r,
-        max(0.35, r * open),
-    ))
+/// Signature half-lidded white sclera D-shape + dark pupil.
+fn bull_eye(cx: f64, _cy: f64, r: f64, open: f64, look_x: f64, look_y: f64) -> Vec<Shape> {
+    let scale = (r / EYE_R).min(1.12);
+    let top = -18.5;
+    let hw = 8.2 * scale;
+    let h = max(0.7, 14.0 * open * scale);
+    let sclera = Path::new(vec![
+        Element::Move(Point::new(cx - hw, top)),
+        Element::Line(Point::new(cx + hw, top)),
+        Element::Quad(Point::new(cx + hw, top + h), Point::new(cx, top + h)),
+        Element::Quad(Point::new(cx - hw, top + h), Point::new(cx - hw, top)),
+        Element::Close,
+    ]);
+    let mut out = vec![Shape {
+        paint: Paint::White,
+        place: Place::Eye,
+        ..Shape::new(sclera)
+    }];
+    if open > 0.25 {
+        let px = cx - cx.signum() * 2.3 + look_x;
+        let py = top + min(h * 0.42, 4.3 * scale) + look_y;
+        let pr = 3.3 * scale;
+        out.push(Shape {
+            paint: Paint::Ink,
+            place: Place::Highlight,
+            ..Shape::new(Path::ellipse(px, py, pr, min(pr, h * 0.36)))
+        });
+    }
+    out
 }
 
-/// A shut eye as a curve: smiling (`up`) or resting.
+fn dot(cx: f64, cy: f64, r: f64, open: f64) -> Shape {
+    Shape {
+        paint: Paint::White,
+        ..Shape::new(Path::ellipse(
+            cx,
+            cy + r * (1.0 - open) * 0.15,
+            r,
+            max(0.35, r * open),
+        ))
+    }
+}
+
+/// A shut eye as a curve: smiling (`up`) or resting (white over dark head).
 fn arc(cx: f64, cy: f64, r: f64, up: bool, width: f64) -> Shape {
     let y0 = cy + if up { r * 0.3 } else { -r * 0.2 };
     let yc = cy + if up { -r * 0.95 } else { r * 0.8 };
@@ -395,6 +417,7 @@ fn arc(cx: f64, cy: f64, r: f64, up: bool, width: f64) -> Shape {
     ]);
     Shape {
         stroke: Some(r * width),
+        paint: Paint::White,
         ..Shape::new(path)
     }
 }
@@ -526,64 +549,47 @@ fn pose(mood: Mood, t: f64, input: Input, r: f64) -> Pose {
         Mood::Wink => {
             let winking = t > 0.25 && t < 1.15;
             let k = ease((t - 0.3) / 0.25) * (1.0 - ease((t - 1.0) / 0.3));
-            let right_eye = if winking {
-                arc(right, y, r, true, 0.5)
+            let mut eyes = bull_eye(left, y, r, 1.0, 0.0, 0.0);
+            if winking {
+                eyes.push(arc(right, y, r, true, 0.5));
             } else {
-                dot(right, y, r, blink(t, 0.12, 0.14))
-            };
+                eyes.extend(bull_eye(right, y, r, blink(t, 0.12, 0.14), 0.0, 0.0));
+            }
             let extras = if k > 0.0 {
-                vec![sparkle(right + r * 2.3, y - r * 2.2, 5.5 * k)]
+                vec![sparkle(right + r * 2.0, y - r * 2.2, 5.5 * k)]
             } else {
                 Vec::new()
             };
             Pose {
                 extras,
                 tilt: 3.0 * k,
-                ..Pose::new(vec![dot(left, y, r, 1.0), right_eye])
+                ..Pose::new(eyes)
             }
         }
         Mood::Wow => {
-            let s = 1.0 + 0.32 * back(t / 0.35, 2.2);
-            let glint = |x: f64| Shape {
-                paint: Paint::White,
-                place: Place::Highlight,
-                ..Shape::new(Path::ellipse(
-                    x - r * 0.38 * s,
-                    y - r * 0.4 * s,
-                    r * 0.26 * s,
-                    r * 0.26 * s,
-                ))
-            };
+            let s = 1.0 + 0.28 * back(t / 0.35, 2.2);
+            let mut eyes = pair(&|x| dot(x, y, r * s, 1.0));
+            for x in [left, right] {
+                eyes.push(Shape {
+                    paint: Paint::Ink,
+                    place: Place::Highlight,
+                    ..Shape::new(Path::ellipse(x, y, r * 0.42 * s, r * 0.42 * s))
+                });
+            }
             Pose {
                 fold: 1.0 - 0.5 * pulse(t, 0.05, 0.5),
                 bounce: 0.6 * pulse(t, 0.0, 0.35),
-                ..Pose::new(vec![
-                    dot(left, y, r * s, 1.0),
-                    dot(right, y, r * s, 1.0),
-                    glint(left),
-                    glint(right),
-                ])
+                ..Pose::new(eyes)
             }
         }
         Mood::Sly => {
-            // Half-lidded, the lids slanted; the eyes slide to one side and back.
+            // Half-lidded, the pupils slide to one side and back.
             let slide = ease(t / 0.4) * (1.0 - ease((t - 1.4) / 0.4));
-            let lidded = |cx: f64, degrees: f64| {
-                let lid = Path::polygon(&[
-                    Point::new(cx - r - 3.0, y - r * 0.08),
-                    Point::new(cx + r + 3.0, y - r * 0.08),
-                    Point::new(cx + r + 3.0, y + r * 1.92),
-                    Point::new(cx - r - 3.0, y + r * 1.92),
-                ])
-                .applying(Affine::rotation_about(degrees, Point::new(cx, y)));
-                Shape {
-                    clip: Some(lid),
-                    ..dot(cx + 3.2 * slide, y, r, 1.0)
-                }
-            };
+            let mut eyes = bull_eye(left, y, r, 0.85, 2.8 * slide, 0.0);
+            eyes.extend(bull_eye(right, y, r, 0.85, 2.8 * slide, 0.0));
             Pose {
                 tilt: -2.0 * slide,
-                ..Pose::new(vec![lidded(left, 10.0), lidded(right, -10.0)])
+                ..Pose::new(eyes)
             }
         }
         Mood::Think => {
@@ -594,35 +600,42 @@ fn pose(mood: Mood, t: f64, input: Input, r: f64) -> Pose {
                     let radius = 3.4 * k;
                     (radius > 0.0).then(|| Shape {
                         place: Place::Above,
-                        ..Shape::new(Path::ellipse(-6.0 + i * 9.0, -50.0, radius, radius))
+                        ..Shape::new(Path::ellipse(-9.0 + i * 9.0, -56.0, radius, radius))
                     })
                 })
                 .collect();
             let open = blink(t, 1.75, 0.14);
+            let mut eyes = bull_eye(left, y, r, open, 1.5, -1.8);
+            eyes.extend(bull_eye(right, y, r, open, 1.5, -1.8));
             Pose {
                 extras: dots,
-                ..Pose::new(pair(&|x| dot(x + 2.2, y - 2.6, r * 0.92, open)))
+                ..Pose::new(eyes)
             }
         }
         Mood::Look => {
             let x = if t < 0.8 {
-                -4.0 * ease(t / 0.25)
+                -3.0 * ease(t / 0.25)
             } else if t < 1.6 {
-                -4.0 + 8.0 * ease((t - 0.8) / 0.3)
+                -3.0 + 6.0 * ease((t - 0.8) / 0.3)
             } else {
-                4.0 - 4.0 * ease((t - 1.6) / 0.3)
+                3.0 - 3.0 * ease((t - 1.6) / 0.3)
             };
             let open = blink(t, 2.1, 0.14);
+            let mut eyes = bull_eye(left, y, r, open, x, 0.0);
+            eyes.extend(bull_eye(right, y, r, open, x, 0.0));
             Pose {
                 tilt: x * 0.5,
-                ..Pose::new(pair(&|cx| dot(cx + x, y, r, open)))
+                ..Pose::new(eyes)
             }
         }
         Mood::Sad => {
             let k = ease(t / 0.5);
             let drop = |cx: f64, degrees: f64| {
                 let half = Path::lower_half_ellipse(cx, y - 1.0, r, r * 0.85);
-                Shape::new(half.applying(Affine::rotation_about(degrees * k, Point::new(cx, y))))
+                Shape {
+                    paint: Paint::White,
+                    ..Shape::new(half.applying(Affine::rotation_about(degrees * k, Point::new(cx, y))))
+                }
             };
             Pose {
                 sink: 2.0 * k,
@@ -635,8 +648,8 @@ fn pose(mood: Mood, t: f64, input: Input, r: f64) -> Pose {
                     let n = i as f64;
                     let k = (t / 2.4 + n * 0.5) % 1.0;
                     zee(
-                        20.0 + n * 12.0 + k * 6.0,
-                        -44.0 - n * 10.0 - k * 8.0,
+                        24.0 + n * 10.0 + k * 5.0,
+                        -52.0 - n * 10.0 - k * 8.0,
                         9.0 - n * 2.5,
                         (PI * k).sin(),
                     )
@@ -655,42 +668,47 @@ fn pose(mood: Mood, t: f64, input: Input, r: f64) -> Pose {
             } else {
                 1.0 - ease((t - 2.2) / 0.25)
             };
-            let lid = 0.55 - 0.47 * k;
+            let lid = 0.72 - 0.58 * k;
+            let mut eyes = bull_eye(left, y, r, lid, 0.0, 0.8 * k);
+            eyes.extend(bull_eye(right, y, r, lid, 0.0, 0.8 * k));
             Pose {
                 tilt: -4.0 * k,
                 sink: 3.0 * k,
-                ..Pose::new(pair(&|x| dot(x, y + 1.5, r * 0.95, lid)))
+                ..Pose::new(eyes)
             }
         }
         Mood::Purr => Pose {
-            // Petted: eyes shut in a smile, the folded ear lifts a little, and the head hums.
+            // Petted: eyes shut in a smile, the left ear lifts a little, and the head hums.
             fold: 1.0 - 0.3 * ease(t / 0.2) * (1.0 - ease((t - 1.1) / 0.3)),
             tilt: 1.1 * (2.0 * PI * 18.0 * t).sin() * (1.0 - ease((t - 0.9) / 0.5)),
             ..Pose::new(smiling())
         },
         Mood::Nulis => {
-            // Writing: eyes down on the page, following the pencil along the line;
-            // a slow blink now and then.
+            // Writing: pupils follow the cursor/pencil along the line; a slow blink now and then.
             let gx = clamp(input.pencil, -1.0, 1.0);
             let open = blink(t, 2.6, 0.16);
+            let mut eyes = bull_eye(left, y, r, open, 2.5 * gx, 2.0);
+            eyes.extend(bull_eye(right, y, r, open, 2.5 * gx, 2.0));
             Pose {
                 tilt: -1.6 * gx,
-                ..Pose::new(pair(&|x| dot(x + 3.0 * gx, y + 3.2, r * 0.94, open)))
+                ..Pose::new(eyes)
             }
         }
         Mood::Baca => {
-            // Reading: the eyes run along a line, then hop back to the start of the next.
+            // Reading: the pupils run along a line, then hop back to the start of the next.
             let k = (t % 3.0) / 3.0;
             let x = if k < 0.82 {
-                -3.6 + 7.2 * ease(k / 0.82)
+                -2.8 + 5.6 * ease(k / 0.82)
             } else {
-                3.6 - 7.2 * ease((k - 0.82) / 0.18)
+                2.8 - 5.6 * ease((k - 0.82) / 0.18)
             };
             let open = blink(t, 1.3, 0.14);
-            Pose::new(pair(&|cx| dot(cx + x, y + 1.6, r * 0.9, open)))
+            let mut eyes = bull_eye(left, y, r, open, x, 1.4);
+            eyes.extend(bull_eye(right, y, r, open, x, 1.4));
+            Pose::new(eyes)
         }
         Mood::Napas => {
-            // Breathing with the person: eyes shut, the folded ear lifting a little
+            // Breathing with the person: eyes shut, the left ear lifting a little
             // at the top of the breath.
             let breath = clamp01(input.breath);
             Pose {
@@ -700,7 +718,7 @@ fn pose(mood: Mood, t: f64, input: Input, r: f64) -> Pose {
             }
         }
         Mood::Tercatat => {
-            // Logged: the ear flips up and snaps down like a page corner, and a tick draws itself.
+            // Logged: the ear flips up and snaps down, and a tick draws itself between the horns.
             let up = if t < 0.35 {
                 ease_out(t / 0.35)
             } else {
@@ -708,18 +726,20 @@ fn pose(mood: Mood, t: f64, input: Input, r: f64) -> Pose {
             };
             let k = ease((t - 0.62) / 0.3) * (1.0 - ease((t - 1.35) / 0.25));
             Pose {
-                extras: check(0.0, -48.0, 6.5, k).into_iter().collect(),
+                extras: check(0.0, -54.0, 6.5, k).into_iter().collect(),
                 fold: 1.0 - 0.85 * clamp(up, 0.0, 1.2),
                 bounce: 0.7 * pulse(t, 0.62, 0.3),
                 ..Pose::new(smiling())
             }
         }
         Mood::Oyen => {
-            // Idle: one blink, a tiny ear flick.
+            // Idle: deadpan half-lidded bull eyes, one blink, a tiny ear flick.
             let open = blink(t, 1.7, 0.16);
+            let mut eyes = bull_eye(left, y, r, open, 0.0, 0.0);
+            eyes.extend(bull_eye(right, y, r, open, 0.0, 0.0));
             Pose {
                 fold: 1.0 - 0.12 * pulse(t, 0.6, 0.35),
-                ..Pose::new(pair(&|x| dot(x, y, r, open)))
+                ..Pose::new(eyes)
             }
         }
     }
@@ -758,35 +778,41 @@ mod tests {
     fn mark_outlines_parse_and_keep_the_logos_size() {
         assert!(!head_path().is_empty());
         assert!(!fold_path().is_empty());
-        for data in [mark::HEAD, mark::FOLD, mark::EYES, mark::EYES_SMALL] {
+        assert!(!right_ear_path().is_empty());
+        assert!(!horns_path().is_empty());
+        assert!(!snout_path().is_empty());
+        assert!(!nostrils_path().is_empty());
+        for data in [
+            mark::HEAD,
+            mark::FOLD,
+            mark::RIGHT_EAR,
+            mark::HORNS,
+            mark::SNOUT,
+            mark::NOSTRILS,
+            mark::EYES,
+            mark::EYES_SMALL,
+        ] {
             assert!(Path::from_svg(data).is_ok());
         }
-        // The head is 104 wide; the chin sits at b = 52 / 1.35.
-        let (x0, _, x1, y1) = bounds(&head_path().points());
-        assert!((x1 - 52.0).abs() < 0.01);
-        assert!((x0 + 52.0).abs() < 0.01);
-        assert!((y1 - 38.52).abs() < 0.01);
-        assert!((y1 - B).abs() < 0.01);
+        // Horns + ears span ~104 wide (`MARK_W`); chin sits at 38.52.
+        let (hx0, _, hx1, _) = bounds(&horns_path().points());
+        assert!(hx0 < -45.0 && hx1 > 45.0);
+        let (_, _, _, y1) = bounds(&head_path().points());
+        assert!((y1 - CHIN).abs() < 0.01);
     }
 
     #[test]
     fn the_logos_eyes_are_the_faces_resting_eyes() {
-        // Same centre and radius as the dots an idle frame draws, in both cuts.
-        for (data, eye_scale) in [(mark::EYES, 1.0), (mark::EYES_SMALL, 8.06 / 6.76)] {
-            let logo = Path::from_svg(data).unwrap();
-            let left: Vec<Point> = logo.points().into_iter().filter(|p| p.x < 0.0).collect();
-            let (x0, y0, x1, y1) = bounds(&left);
-            let (fx0, fy0, fx1, fy1) = bounds(
-                &frame(Mood::Oyen, 0.0, Input::default(), eye_scale).eyes[0]
-                    .path
-                    .points(),
-            );
-            for (a, b) in [(x0, fx0), (y0, fy0), (x1, fx1), (y1, fy1)] {
-                assert!(
-                    (a - b).abs() < 0.02,
-                    "logo {a} vs face {b} at scale {eye_scale}"
-                );
-            }
+        let logo = Path::from_svg(mark::EYES).unwrap();
+        let left: Vec<Point> = logo.points().into_iter().filter(|p| p.x < 0.0).collect();
+        let (x0, y0, x1, y1) = bounds(&left);
+        let (fx0, fy0, fx1, fy1) = bounds(
+            &frame(Mood::Oyen, 0.0, Input::default(), 1.0).eyes[0]
+                .path
+                .points(),
+        );
+        for (a, b) in [(x0, fx0), (y0, fy0), (x1, fx1), (y1, fy1)] {
+            assert!((a - b).abs() < 0.02, "logo {a} vs face {b}");
         }
     }
 
@@ -856,11 +882,10 @@ mod tests {
 
     #[test]
     fn larger_eyes_for_small_sizes_keep_their_place() {
-        let logo = at(Mood::Oyen, 0.0);
-        let small = frame(Mood::Oyen, 0.0, Input::default(), 8.06 / 6.76);
-        assert!((eye_height(&small) - 16.12).abs() < 0.01);
-        assert!((eye_height(&logo) - 13.52).abs() < 0.01);
-        assert_eq!(eye_centre(&small), eye_centre(&logo));
+        let rest = frame(Mood::Oyen, 0.0, Input::default(), 1.0);
+        let small = frame(Mood::Oyen, 0.0, Input::default(), 1.08);
+        assert!(eye_height(&small) > eye_height(&rest));
+        assert_eq!(eye_centre(&small).0, eye_centre(&rest).0);
     }
 
     #[test]
@@ -883,7 +908,11 @@ mod tests {
             },
             1.0,
         );
-        assert!(eye_centre(&ahead).0 > eye_centre(&behind).0);
+        let pupil_x = |f: &Frame| {
+            let (x0, _, x1, _) = bounds(&f.eyes[1].path.points());
+            (x0 + x1) / 2.0
+        };
+        assert!(pupil_x(&ahead) > pupil_x(&behind));
         // The pencil is clamped to the line.
         assert_eq!(
             frame(

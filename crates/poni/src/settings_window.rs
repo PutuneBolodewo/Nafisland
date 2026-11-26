@@ -37,7 +37,7 @@ use std::collections::HashMap;
 /// The card, in DIPs. Windows' window gives it room for its shadow and is
 /// less tall on a short screen (the content scrolls).
 pub const CARD_W: f32 = 840.0;
-pub const CARD_H: f32 = 580.0;
+pub const CARD_H: f32 = 710.0;
 /// Its corners when the window draws its own (Windows).
 const RADIUS: f32 = 14.0;
 const SIDEBAR_W: f32 = 220.0;
@@ -157,12 +157,13 @@ pub enum Section {
     Prayer,
     Caffeine,
     Ai,
+    EveIntel,
     Oyenza,
     About,
 }
 
 impl Section {
-    pub const ALL: [Section; 13] = [
+    pub const ALL: [Section; 14] = [
         Section::General,
         Section::Appearance,
         Section::Island,
@@ -174,6 +175,7 @@ impl Section {
         Section::Prayer,
         Section::Caffeine,
         Section::Ai,
+        Section::EveIntel,
         Section::Oyenza,
         Section::About,
     ];
@@ -191,6 +193,7 @@ impl Section {
             Section::Prayer => "Prayer times",
             Section::Caffeine => "Caffeine",
             Section::Ai => "AI usage",
+            Section::EveIntel => "EVE Intel",
             Section::Oyenza => "Oyenza account",
             Section::About => "About",
         }
@@ -210,6 +213,7 @@ impl Section {
             Section::Prayer => "prayer",
             Section::Caffeine => "caffeine",
             Section::Ai => "ai",
+            Section::EveIntel => "eveintel",
             Section::Oyenza => "oyenza",
             Section::About => "about",
         }
@@ -228,6 +232,7 @@ impl Section {
             Section::Prayer => Icon::Moon,
             Section::Caffeine => Icon::Coffee,
             Section::Ai => Icon::Ai,
+            Section::EveIntel => Icon::Eye,
             Section::Oyenza => Icon::Oyenza,
             Section::About => Icon::Gear,
         }
@@ -247,6 +252,7 @@ impl Section {
             Section::Prayer => Color::hex(0x30B0A0),
             Section::Caffeine => Color::hex(0xA2845E),
             Section::Ai => palette::PURPLE,
+            Section::EveIntel => palette::RED,
             Section::Oyenza => palette::ORANGE,
             Section::About => Color::hex(0x8E8E93),
         }
@@ -259,6 +265,7 @@ impl Section {
             Section::Prayer => st.prayer_on(),
             Section::Caffeine => st.caffeine_on(),
             Section::Ai => st.ai_usage_on(),
+            Section::EveIntel => st.eve_intel_on(),
             _ => true,
         }
     }
@@ -314,6 +321,16 @@ pub enum Key {
     CaffeineRemind,
     AiNotices,
     AiNear,
+    EveFolder,
+    EveFolderReset,
+    EveAlarmOn,
+    EveSoundPick,
+    EveSoundReset,
+    EveSoundTest,
+    EveCooldown,
+    EvePopup,
+    EveAlertJumps,
+    EveIgnoreClr,
     SettingsFile,
     DataFolder,
     ReleaseNotes,
@@ -384,13 +401,14 @@ const FULLSCREEN: [(bool, &str); 2] = [(true, "Hide"), (false, "Stay on top")];
 const SOUNDS: [(PrayerSound, &str); 3] = [(PrayerSound::Adzan, "Adzan"), (PrayerSound::Tone, "Tone"), (PrayerSound::Silent, "Silent")];
 /// Whose times and Hijri dates (the Prayer page's place picker has the same).
 const FOLLOWS: [(PrayerFollow, &str); 2] = [(PrayerFollow::Kemenag, "Kemenag"), (PrayerFollow::Muhammadiyah, "Muhammadiyah (KHGT)")];
-const THEMES: [(Theme, &str, &str); 6] = [
+const THEMES: [(Theme, &str, &str); 7] = [
     (Theme::Classic, "Classic", "A black island at the top edge"),
     (Theme::Oyen, poni_core::brand::MASCOT_NAME, "Mascot lives in the island"),
     (Theme::Glass, "Glass", "Frosted glass over your screen"),
     (Theme::Pill, "Pill", "Floats just below the top edge"),
     (Theme::Diorama, "Diorama", "A little place that keeps your day"),
     (Theme::Horizon, "Horizon", "Sky gradient and icons synced to time"),
+    (Theme::HorizonPill, "Horizon Pill", "Floating sky pill synced to time"),
 ];
 /// Start with Windows, or at login on a Mac (its menu bar says so).
 const AUTOSTART: (&str, &str) = if cfg!(target_os = "macos") {
@@ -620,6 +638,56 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                 Block::Note("Add what you drink on the island's Caffeine page."),
             ]
         }
+        Section::EveIntel => {
+            let e = &s.eve_intel;
+            let folder_sub = e
+                .chatlogs_dir
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| "Default (%USERPROFILE%\\Documents\\EVE\\logs\\Chatlogs)".to_string());
+            let mut folder_rows = vec![item(Key::EveFolder, "Chatlogs folder", Some(&folder_sub), Ctl::Button("Choose…"))];
+            if e.chatlogs_dir.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+                folder_rows.push(item(Key::EveFolderReset, "Reset folder", Some("Use Documents\\EVE\\logs\\Chatlogs"), Ctl::Button("Reset")));
+            }
+
+            let sound_sub = e
+                .sound_path
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .and_then(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| "Default system chime".to_string());
+            let cooldown = if e.cooldown_s == 0 { "Off".to_string() } else { format!("{} s", e.cooldown_s) };
+            let mut alarm_rows = vec![
+                switch(Key::EveAlarmOn, "Audio alarm", Some("Play an alarm sound when new intel arrives"), e.alarm_on),
+                item(Key::EveSoundPick, "Custom alarm sound", Some(&sound_sub), Ctl::Button("Choose…")),
+            ];
+            if e.sound_path.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+                alarm_rows.push(item(Key::EveSoundReset, "Clear custom sound", Some("Revert to the default system chime"), Ctl::Button("Reset")));
+            }
+            alarm_rows.push(item(Key::EveSoundTest, "Test alarm", Some("Play the selected sound now"), Ctl::Button("Play")));
+            alarm_rows.push(item(Key::EveCooldown, "Alarm cooldown", Some("Minimum gap between repeated sounds"), Ctl::Stepper(cooldown)));
+
+            let ignore_clr = !e.ignore_words.trim().is_empty();
+            let jumps = if e.alert_jumps == 0 {
+                "0 jumps (same system)".to_string()
+            } else if e.alert_jumps == 1 {
+                "1 jump".to_string()
+            } else {
+                format!("{} jumps", e.alert_jumps)
+            };
+            let alert_rows = vec![
+                item(Key::EveAlertJumps, "Detection radius", Some("Alert for reports within this many jumps of an active character"), Ctl::Stepper(jumps)),
+                switch(Key::EvePopup, "Collapsed island pop-up", Some("Show an alert banner on the closed island"), e.popup_notice),
+                switch(Key::EveIgnoreClr, "Ignore clear reports (clr)", Some("Skip alarms for messages containing clr or clear"), ignore_clr),
+            ];
+            vec![
+                Block::Group(Some("Chatlogs"), folder_rows),
+                Block::Group(Some("Alarm and sound"), alarm_rows),
+                Block::Group(Some("Alerts"), alert_rows),
+                Block::Note("Set the channel name on the island's EVE Intel tab."),
+            ]
+        }
         Section::Oyenza => vec![Block::Account],
         Section::About => vec![
             Block::Version,
@@ -800,6 +868,35 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
         Key::CaffeineRemind => s.caffeine.remind = !s.caffeine.remind,
         Key::AiNotices => s.usage.notices = !s.usage.notices,
         Key::AiNear => s.usage.near_pct = (s.usage.near_pct as i32 + step * 5).clamp(50, 95) as u8,
+        Key::EveFolder => {
+            st.cmd(Command::EveIntel(crate::commands::EveIntelCmd::PickDir));
+            return;
+        }
+        Key::EveFolderReset => {
+            s.eve_intel.chatlogs_dir = None;
+        }
+        Key::EveAlarmOn => s.eve_intel.alarm_on = !s.eve_intel.alarm_on,
+        Key::EveSoundPick => {
+            st.cmd(Command::EveIntel(crate::commands::EveIntelCmd::PickSound));
+            return;
+        }
+        Key::EveSoundReset => {
+            s.eve_intel.sound_path = None;
+        }
+        Key::EveSoundTest => {
+            st.cmd(Command::EveIntel(crate::commands::EveIntelCmd::TestAlarm));
+            return;
+        }
+        Key::EveCooldown => s.eve_intel.cooldown_s = (s.eve_intel.cooldown_s as i32 + step * 5).clamp(0, 60) as u32,
+        Key::EveAlertJumps => s.eve_intel.alert_jumps = (s.eve_intel.alert_jumps as i32 + step).clamp(0, 5) as u8,
+        Key::EvePopup => s.eve_intel.popup_notice = !s.eve_intel.popup_notice,
+        Key::EveIgnoreClr => {
+            s.eve_intel.ignore_words = if s.eve_intel.ignore_words.trim().is_empty() {
+                poni_core::eve_intel::DEFAULT_IGNORE_WORDS.into()
+            } else {
+                String::new()
+            };
+        }
         Key::SettingsFile => {
             st.cmd(Command::OpenPath(crate::paths::settings_path().to_string_lossy().into_owned()));
             return;
@@ -1787,10 +1884,20 @@ fn draw_theme_preview(c: &mut Canvas, theme: Theme, screen: Rect) {
             c.fill_rrect(body.offset(0.0, 2.0), body.h / 2.0, Color::black(0.25));
             c.image_exact(&image, body, body.h / 2.0);
         }
-        Theme::Horizon => {
-            let body = Rect::new(cx - 38.0, screen.y, 76.0, 22.0);
+        Theme::Horizon | Theme::HorizonPill => {
+            let floating = theme == Theme::HorizonPill;
+            let body = if floating {
+                Rect::new(cx - 38.0, screen.y + THEME_FLOAT, 76.0, 20.0)
+            } else {
+                Rect::new(cx - 38.0, screen.y, 76.0, 22.0)
+            };
             let dawn = poni_core::horizon::palette_at(7.0 * 60.0, poni_core::horizon::SkySchedule::default());
-            c.push_outline_mask(&crate::gfx::notch_segments(body, 9.0, 6.0));
+            if floating {
+                c.fill_rrect(body.offset(0.0, 2.0), 10.0, Color::black(0.25));
+                c.push_outline_mask(&crate::pill::shape::segments(body, 10.0));
+            } else {
+                c.push_outline_mask(&crate::gfx::notch_segments(body, 9.0, 6.0));
+            }
             c.fill_linear_gradient_stops(Rect::new(body.x - 6.0, body.y, body.w + 12.0, body.h), &dawn.stops);
             let m = [
                 poni_core::svgpath::Seg::MoveTo(body.x, body.bottom()),
@@ -1852,10 +1959,32 @@ mod tests {
                     // Start with Windows waits for its reading; the buttons open things.
                     Key::Autostart => assert!(st.cmds.is_empty()),
                     Key::SettingsFile | Key::DataFolder | Key::ReleaseNotes | Key::LyricsCredit => assert!(opens, "{:?}", it.key),
+                    Key::EveFolder | Key::EveSoundPick | Key::EveSoundTest => {
+                        assert!(st.cmds.iter().any(|c| matches!(c, Command::EveIntel(_))), "{:?}", it.key)
+                    }
                     _ => assert!(saved, "{:?} didn't save", it.key),
                 }
             }
         }
+    }
+
+    #[test]
+    fn eve_intel_has_a_section_only_while_its_add_on_is_on() {
+        let mut st = state();
+        assert!(!sections(&st).contains(&Section::EveIntel));
+        st.settings.set_addon(poni_core::addons::EVE_INTEL.id, true);
+        st.addons.insert(poni_core::addons::EVE_INTEL.id, poni_core::addons::Status::Ready);
+        assert!(sections(&st).contains(&Section::EveIntel));
+        apply(&mut st, Key::EveCooldown, Act::Step(1));
+        assert_eq!(st.settings.eve_intel.cooldown_s, 10);
+        apply(&mut st, Key::EveAlertJumps, Act::Step(-2));
+        assert_eq!(st.settings.eve_intel.alert_jumps, 3);
+        apply(&mut st, Key::EveAlertJumps, Act::Step(-10));
+        assert_eq!(st.settings.eve_intel.alert_jumps, 0);
+        apply(&mut st, Key::EveAlertJumps, Act::Step(10));
+        assert_eq!(st.settings.eve_intel.alert_jumps, 5);
+        apply(&mut st, Key::EveIgnoreClr, Act::Toggle);
+        assert!(st.settings.eve_intel.ignore_words.is_empty());
     }
 
     #[test]
@@ -2110,12 +2239,13 @@ mod tests {
             Theme::Pill => 3,
             Theme::Diorama => 4,
             Theme::Horizon => 5,
+            Theme::HorizonPill => 6,
         }
     }
 
     #[test]
     fn every_theme_has_a_card_in_the_pickers_order() {
-        assert_eq!(THEMES.map(|t| t.1), ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon"]);
+        assert_eq!(THEMES.map(|t| t.1), ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon", "Horizon Pill"]);
         for (i, (theme, name, line)) in THEMES.iter().enumerate() {
             assert_eq!(place(*theme), i, "{name}");
             assert!(!line.is_empty(), "{name} says what it is");
@@ -2127,10 +2257,11 @@ mod tests {
         // The content column: the card less the sidebar and the padding.
         let r = Rect::new(SIDEBAR_W + PAD, CONTENT_Y, CARD_W - SIDEBAR_W - 2.0 * PAD, block_h(&state(), &Block::Themes));
         let cards: Vec<Rect> = (0..THEMES.len()).map(|i| theme_card(r, i)).collect();
-        // Six themes: three, then three, the same size.
+        // Seven themes: three, three, and one on the third row, all the same size.
         assert_eq!(cards.iter().filter(|c| c.y == cards[0].y).count(), 3);
         assert_eq!(cards.iter().filter(|c| c.y == cards[3].y).count(), 3);
-        assert_eq!(r.h, GROUP_TITLE_H + 2.0 * THEME_CARD_H + THEME_GAP);
+        assert_eq!(cards.iter().filter(|c| c.y == cards[6].y).count(), 1);
+        assert_eq!(r.h, GROUP_TITLE_H + 3.0 * THEME_CARD_H + 2.0 * THEME_GAP);
         for (i, c) in cards.iter().enumerate() {
             assert_eq!((c.w, c.h), (180.0, THEME_CARD_H), "card {i}");
             assert!(c.x >= r.x && c.right() <= r.right() && c.y >= r.y + GROUP_TITLE_H && c.bottom() <= r.bottom(), "card {i} leaves the block: {c:?}");

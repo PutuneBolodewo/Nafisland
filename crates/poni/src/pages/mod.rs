@@ -14,6 +14,7 @@ pub mod caffeine;
 pub mod card;
 pub mod downloads;
 pub mod downloads_offer;
+pub mod eve_intel;
 pub mod focus;
 pub mod health;
 pub mod ielts;
@@ -97,6 +98,8 @@ pub enum PageKind {
     /// Which apps' notifications show on the island, while Notifications is
     /// on ([`tabs`]; Windows' Store copy only).
     Notifications,
+    /// EVE Online Intel Tool page, while its add-on is on ([`tabs`]).
+    EveIntel,
     /// The "+" at the end of the tab row: features to switch on, each of
     /// which downloads only then (`poni_core::addons`).
     Addons,
@@ -107,7 +110,7 @@ pub enum PageKind {
 impl PageKind {
     /// The tab row's order: the island's own pages, Oyenza, then the
     /// add-ons' pages and the "+".
-    pub const ALL: [PageKind; 20] = [
+    pub const ALL: [PageKind; 21] = [
         PageKind::Media,
         PageKind::Today,
         PageKind::Shelf,
@@ -126,6 +129,7 @@ impl PageKind {
         PageKind::Caffeine,
         PageKind::Downloads,
         PageKind::Notifications,
+        PageKind::EveIntel,
         PageKind::Addons,
         PageKind::Settings,
     ];
@@ -150,6 +154,7 @@ impl PageKind {
             PageKind::Caffeine => "caffeine",
             PageKind::Downloads => "downloads",
             PageKind::Notifications => "notifications",
+            PageKind::EveIntel => "eveintel",
             PageKind::Addons => "addons",
             PageKind::Settings => "settings",
         }
@@ -181,6 +186,7 @@ impl PageKind {
             PageKind::Caffeine => "Caffeine",
             PageKind::Downloads => "Downloads",
             PageKind::Notifications => "Notifications",
+            PageKind::EveIntel => "EVE Intel",
             PageKind::Addons => "Add-ons",
             PageKind::Settings => "Settings",
         }
@@ -206,6 +212,7 @@ impl PageKind {
             PageKind::Caffeine => Icon::Coffee,
             PageKind::Downloads => Icon::Download,
             PageKind::Notifications => Icon::Bell,
+            PageKind::EveIntel => Icon::Eye,
             PageKind::Addons => Icon::Addons,
             PageKind::Settings => Icon::Gear,
         }
@@ -285,6 +292,7 @@ fn row(st: &AppState, open: Option<PageKind>) -> Vec<PageKind> {
             PageKind::Downloads => st.downloader_on(),
             PageKind::Record => st.record_on(),
             PageKind::Notifications => st.notifications_on(),
+            PageKind::EveIntel => st.eve_intel_on(),
             p if p.hideable() => !st.tab_hidden(p) || open == Some(p),
             p => p.tabbed(),
         })
@@ -319,6 +327,7 @@ pub fn content_height(p: PageKind, st: &AppState) -> f32 {
         PageKind::Caffeine => caffeine::height(st),
         PageKind::Downloads => downloads::height(st),
         PageKind::Notifications => notifications::height(st),
+        PageKind::EveIntel => eve_intel::height(st),
         PageKind::Addons => addons::height(st),
         PageKind::Settings => settings::height(st),
     }
@@ -462,6 +471,7 @@ pub(crate) fn draw_page(ui: &mut Ui, st: &mut AppState, area: Rect, page: PageKi
         PageKind::Caffeine => caffeine::draw(ui, st, area),
         PageKind::Downloads => downloads::draw(ui, st, area),
         PageKind::Notifications => notifications::draw(ui, st, area),
+        PageKind::EveIntel => eve_intel::draw(ui, st, area),
         PageKind::Addons => addons::draw(ui, st, area),
         PageKind::Settings => settings::draw(ui, st, area),
     }
@@ -846,6 +856,7 @@ mod tests {
         assert!(content_height(PageKind::Addons, &st) <= content_height(PageKind::System, &st));
         assert!(content_height(PageKind::Stocks, &st) <= content_height(PageKind::System, &st));
         assert!(content_height(PageKind::Caffeine, &st) <= content_height(PageKind::System, &st));
+        assert!(content_height(PageKind::EveIntel, &st) <= content_height(PageKind::System, &st));
         // Notifications with as many apps as it lists.
         for i in 0..poni_core::notifications::MAX_APPS {
             st.settings.notifications.remember(&format!("App.{i}"), &format!("App {i}"));
@@ -887,6 +898,11 @@ mod tests {
             st.addons.insert(id, poni_core::addons::Status::Ready);
             assert!(!tabs(&st).contains(&page), "{id} add-on is removed");
         }
+        let eve = poni_core::addons::EVE_INTEL;
+        assert!(!tabs(&st).contains(&PageKind::EveIntel));
+        st.settings.set_addon(eve.id, true);
+        st.addons.insert(eve.id, poni_core::addons::Status::Ready);
+        assert!(tabs(&st).contains(&PageKind::EveIntel));
     }
 
     #[test]

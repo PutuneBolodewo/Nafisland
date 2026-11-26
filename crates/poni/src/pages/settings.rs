@@ -86,7 +86,7 @@ const CHIP_ICON_GAP: f32 = 5.0;
 const CHIP_GAP: f32 = 6.0;
 
 // Glass: on Windows from a copy of the screen, on a Mac macOS's own glass.
-const THEMES: [(Theme, &str); 6] = [(Theme::Classic, "Classic"), (Theme::Oyen, "Oyen"), (Theme::Glass, "Glass"), (Theme::Pill, "Pill"), (Theme::Diorama, "Diorama"), (Theme::Horizon, "Horizon")];
+const THEMES: [(Theme, &str); 7] = [(Theme::Classic, "Classic"), (Theme::Oyen, "Oyen"), (Theme::Glass, "Glass"), (Theme::Pill, "Pill"), (Theme::Diorama, "Diorama"), (Theme::Horizon, "Horizon"), (Theme::HorizonPill, "Horizon Pill")];
 
 /// An idle look's name in the picker (`eyes` is Oyen in his theme).
 fn idle_name(s: IdleStyle, eyes: &'static str) -> &'static str {
@@ -736,12 +736,13 @@ mod tests {
             Theme::Pill => 3,
             Theme::Diorama => 4,
             Theme::Horizon => 5,
+            Theme::HorizonPill => 6,
         }
     }
 
     #[test]
     fn the_theme_picker_has_every_theme_by_its_name() {
-        assert_eq!(THEMES.map(|t| t.1), ["Classic", "Oyen", "Glass", "Pill", "Diorama", "Horizon"]);
+        assert_eq!(THEMES.map(|t| t.1), ["Classic", "Oyen", "Glass", "Pill", "Diorama", "Horizon", "Horizon Pill"]);
         for (i, (theme, name)) in THEMES.iter().enumerate() {
             assert_eq!(place(*theme), i, "{name}");
         }

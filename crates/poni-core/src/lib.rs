@@ -14,6 +14,8 @@ pub mod brand;
 pub mod caffeine;
 pub mod datetime;
 pub mod downloads;
+pub mod eve_intel;
+pub mod eve_map;
 pub mod frames;
 pub mod frametime;
 pub mod geom;

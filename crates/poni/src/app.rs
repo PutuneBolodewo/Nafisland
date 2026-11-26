@@ -471,6 +471,9 @@ pub struct App {
     today_watch: bool,
     /// What the AI tab's worker was last told (`set_usage_watch`).
     usage_watch: services::usage::Watch,
+    /// EVE Online Intel Tool alarm player and watcher configuration.
+    eve_alarm: services::eve_intel::AlarmPlayer,
+    eve_intel_watch: services::eve_intel::Watch,
     /// Show over games: the game's frames, counted while the readout shows.
     frames: Option<services::frames::Frames>,
     /// The process whose frames count (the full-screen app).
@@ -718,6 +721,8 @@ impl App {
             stocks_open: false,
             today_watch: false,
             usage_watch: services::usage::Watch::default(),
+            eve_alarm: Default::default(),
+            eve_intel_watch: services::eve_intel::Watch::default(),
             frames: None,
             game_pid: None,
             game_peek_until: 0.0,
@@ -782,6 +787,7 @@ impl App {
             if self.st.settings.game_stats {
                 self.check_fps();
             }
+            self.set_eve_intel_watch();
             // Notifications on: listen if Windows already allows it (its
             // question waits for the page's Allow).
             if self.st.notifications_on() {
@@ -1478,6 +1484,7 @@ impl App {
                 self.tell_sysmon_rest();
                 self.set_stocks_watch();
                 self.set_usage_watch();
+                self.set_eve_intel_watch();
                 self.update_due();
                 self.request_frame();
                 Some(LRESULT(1))
@@ -1492,6 +1499,7 @@ impl App {
                 self.tell_sysmon_rest();
                 self.set_stocks_watch();
                 self.set_usage_watch();
+                self.set_eve_intel_watch();
                 self.update_due();
                 self.request_frame();
                 Some(LRESULT(0))
@@ -1928,6 +1936,123 @@ impl App {
         }
     }
 
+    /// EVE Intel watcher: watches Chatlogs only while the add-on is on, a
+    /// channel name is set, and the session is active.
+    fn set_eve_intel_watch(&mut self) {
+        if self.selftest.is_some() {
+            return;
+        }
+        let here = !self.locked && !self.display_off;
+        let ch = self.st.settings.eve_intel.channel.trim().to_string();
+        let active = here && self.st.eve_intel_on() && !ch.is_empty();
+        let dir = services::eve_intel::resolved_dir(self.st.settings.eve_intel.chatlogs_dir.as_deref()).unwrap_or_default();
+        let w = services::eve_intel::Watch {
+            active,
+            channel: ch,
+            dir,
+            ignore_words: self.st.settings.eve_intel.ignore_words.clone(),
+        };
+        if w == self.eve_intel_watch {
+            return;
+        }
+        self.eve_intel_watch = w.clone();
+        if let Some(s) = self.services.as_ref() {
+            s.eve_intel_watch(w);
+        }
+    }
+
+    fn eve_intel_cmd(&mut self, c: crate::commands::EveIntelCmd) {
+        use crate::commands::EveIntelCmd;
+        match c {
+            EveIntelCmd::SetChannel(ch) => {
+                let ch = ch.trim().to_string();
+                self.st.settings.eve_intel.channel = ch.clone();
+                self.st.ui.eve_channel_input = ch;
+                self.st.eve_intel.items.clear();
+                self.st.eve_intel.filename = None;
+                self.st.eve_intel.error = None;
+                self.save_settings();
+                self.set_eve_intel_watch();
+            }
+            EveIntelCmd::SsoConnect => {
+                self.st.eve_intel.sso_note = Some("Public mode active · SSO v2 PKCE next".into());
+            }
+            EveIntelCmd::TestAlarm => {
+                let custom = self.st.settings.eve_intel.sound_path.as_deref().map(str::to_string);
+                self.eve_alarm.play(custom.as_deref(), &self.sink);
+            }
+            EveIntelCmd::PickSound => services::eve_intel::pick_sound_async(self.sink.clone()),
+            EveIntelCmd::PickDir => {
+                let initial = services::eve_intel::resolved_dir(self.st.settings.eve_intel.chatlogs_dir.as_deref())
+                    .map(|p| p.to_string_lossy().into_owned());
+                services::eve_intel::pick_dir_async(self.sink.clone(), initial);
+            }
+        }
+    }
+
+    fn on_eve_intel(&mut self, ev: services::eve_intel::EveIntelEvent, now: f64) {
+        use services::eve_intel::EveIntelEvent;
+        match ev {
+            EveIntelEvent::Session { active_clients, filename, history, error } => {
+                self.st.eve_intel.active_clients = active_clients;
+                self.st.eve_intel.filename = filename;
+                self.st.eve_intel.error = error;
+                self.st.eve_intel.items = history;
+                self.st.ui.eve_feed_scroll = 0.0;
+            }
+            EveIntelEvent::ActiveClients(n) => {
+                self.st.eve_intel.active_clients = n;
+            }
+            EveIntelEvent::Intel(items) => {
+                let max_jumps = self.st.settings.eve_intel.alert_jumps;
+                let mut latest_alert = None;
+                for item in items {
+                    let in_radius = item.min_jumps.is_some_and(|j| j <= max_jumps);
+                    if !item.ignored && in_radius {
+                        latest_alert = Some(item.clone());
+                    }
+                    self.st.eve_intel.items.push(item);
+                }
+                if self.st.eve_intel.items.len() > 60 {
+                    let drop_n = self.st.eve_intel.items.len() - 60;
+                    self.st.eve_intel.items.drain(..drop_n);
+                }
+                if let Some(item) = latest_alert {
+                    if self.st.settings.eve_intel.popup_notice && !self.expanded {
+                        let jump_tag = item.min_jumps.map(|j| format!(" ({j}j)")).unwrap_or_default();
+                        let notice = Notice {
+                            icon: Icon::Bell,
+                            color: poni_core::geom::palette::RED,
+                            title: format!("EVE Intel · {}{jump_tag}", item.parsed.systems.join(", ")),
+                            title_dim: self.st.settings.eve_intel.channel.clone(),
+                            subtitle: item.parsed.summary(),
+                            until: now + 8.0,
+                            action: Some(NoticeAction::OpenPage(PageKind::EveIntel)),
+                            inline: None,
+                            reveal: None,
+                        };
+                        self.st.show_or_hold(notice, self.fullscreen_hidden);
+                    }
+                    let cd = self.st.settings.eve_intel.cooldown_s as f64;
+                    if self.st.settings.eve_intel.alarm_on && (now - self.st.eve_intel.last_alarm_at >= cd) {
+                        self.st.eve_intel.last_alarm_at = now;
+                        let custom = self.st.settings.eve_intel.sound_path.as_deref().map(str::to_string);
+                        self.eve_alarm.play(custom.as_deref(), &self.sink);
+                    }
+                }
+            }
+            EveIntelEvent::PickedSound(path) => {
+                self.st.settings.eve_intel.sound_path = Some(path);
+                self.save_settings();
+            }
+            EveIntelEvent::PickedDir(path) => {
+                self.st.settings.eve_intel.chatlogs_dir = Some(path);
+                self.save_settings();
+                self.set_eve_intel_watch();
+            }
+        }
+    }
+
     /// Hide and Show change the AI tab's settings; the rest is its worker's.
     fn usage_cmd(&mut self, c: UsageCmd) {
         match c {
@@ -2355,6 +2480,11 @@ impl App {
         if before.usage.notices != self.st.settings.usage.notices {
             self.set_usage_watch();
         }
+        let eve_id = poni_core::addons::EVE_INTEL.id;
+        if before.addon_on(eve_id) != self.st.settings.addon_on(eve_id) && !self.st.settings.addon_on(eve_id) {
+            self.eve_alarm.stop();
+        }
+        self.set_eve_intel_watch();
         // The display the island hangs on, or its width when open (the
         // Settings window has both).
         if before.monitor != self.st.settings.monitor {
@@ -2476,7 +2606,7 @@ impl App {
         // What the Settings window shows that a service reports.
         let shown = matches!(
             ev,
-            AppEvent::Autostart(_) | AppEvent::Update(_) | AppEvent::Oyenza(_) | AppEvent::Addon { .. } | AppEvent::Usage(_) | AppEvent::Located(_) | AppEvent::Notify(_)
+            AppEvent::Autostart(_) | AppEvent::Update(_) | AppEvent::Oyenza(_) | AppEvent::Addon { .. } | AppEvent::Usage(_) | AppEvent::Located(_) | AppEvent::Notify(_) | AppEvent::EveIntel(_)
         );
         if let Some(w) = self.settings_win.as_mut().filter(|_| shown) {
             w.view.dirty = true;
@@ -2753,6 +2883,8 @@ impl App {
                 let fx = self.st.ielts.mic_failed(issue);
                 self.ielts_do(fx);
             }
+            AppEvent::EveIntel(ev) => self.on_eve_intel(ev, now),
+            AppEvent::EveAlarmEnded => self.eve_alarm.stop(),
             AppEvent::Log(s) => pinfo!("{s}"),
         }
         if let Some(before) = media_before {
@@ -3593,7 +3725,7 @@ impl App {
         }
         let horizon_paused = self.locked || self.display_off || self.st.power.saver || self.fullscreen_hidden;
         let ph = pill::horizon::phase(&self.st);
-        if self.st.settings.theme == Theme::Horizon {
+        if pill::horizon::is_on(self.st.settings.theme) {
             self.st.accent = pill::horizon::palette(&self.st).accent;
         }
         if self.st.horizon_star.tick(self.st.settings.theme, ph, now, horizon_paused) {
@@ -3614,6 +3746,7 @@ impl App {
             PageKind::Ielts => !self.st.ielts_on(),
             PageKind::Notes => !self.st.notes_on(),
             PageKind::Ai => !self.st.ai_usage_on(),
+            PageKind::EveIntel => !self.st.eve_intel_on(),
             _ => false,
         };
         if gone {
@@ -3718,6 +3851,7 @@ impl App {
         self.set_today_watch(self.mode == Mode::Expanded(PageKind::Today));
         self.set_stocks_watch();
         self.set_usage_watch();
+        self.set_eve_intel_watch();
         // The Pill theme floats the island below the top edge.
         self.island.set_floating(pill::on(self.st.settings.theme).then_some(pill::TOP_GAP));
         self.island.step(dt, now);
@@ -3827,7 +3961,11 @@ impl App {
                     if floating {
                         // Hidden floats nothing: its band takes the mouse.
                         if !hidden_idle {
-                            pill::shape::draw_body(&mut canvas, body, geom.r, island_color, border);
+                            if self.st.settings.theme == Theme::HorizonPill {
+                                pill::shape::draw_horizon_body(&mut canvas, &self.st, body, geom.r, border);
+                            } else {
+                                pill::shape::draw_body(&mut canvas, body, geom.r, island_color, border);
+                            }
                         }
                     } else if self.st.settings.theme == Theme::Horizon && !hidden_idle {
                         canvas.push_outline_mask(&crate::gfx::notch_segments(body, geom.r, SHOULDER));
@@ -4858,6 +4996,10 @@ impl App {
                     self.save_settings();
                 }
                 Command::OpenSettings => self.show_settings(deferred),
+                Command::OpenSettingsSection(sec) => {
+                    self.collapse();
+                    self.open_settings_window(Some(sec), deferred);
+                }
                 Command::SaveStore => unsafe {
                     SetTimer(self.hwnd, TIMER_SAVE, 800, None);
                 },
@@ -4916,6 +5058,7 @@ impl App {
                 }
                 Command::Download(c) => self.download_cmd(c),
                 Command::Notify(c) => self.notify_cmd(c),
+                Command::EveIntel(c) => self.eve_intel_cmd(c),
             }
         }
         self.sync_phone_offer();
@@ -5654,7 +5797,7 @@ fn theme_accent(theme: Theme) -> Color {
         poni_core::look::DIORAMA_ACCENT
     } else if theme == Theme::Glass {
         services::system_accent_base().unwrap_or(palette::BLUE)
-    } else if theme == Theme::Horizon {
+    } else if pill::horizon::is_on(theme) {
         poni_core::horizon::palette_at(
             (clock::local_now().hour as f32) * 60.0 + clock::local_now().minute as f32,
             poni_core::horizon::SkySchedule::default(),
