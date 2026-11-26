@@ -146,6 +146,42 @@ pub struct Settings {
     pub notifications: crate::notifications::NotificationSettings,
     /// How Oyen talks on the IELTS page (Sopan, Gaul or Ngegas, the default).
     pub ielts_spice: Spice,
+    /// EVE Online Intel Tool add-on choices.
+    pub eve_intel: EveIntelSettings,
+}
+
+/// Settings for the EVE Online Intel Tool add-on.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EveIntelSettings {
+    /// Intel channel name typed by the user (e.g. `I. Ftn Intel`).
+    pub channel: String,
+    /// Custom chatlogs directory; None resolves `%USERPROFILE%\Documents\EVE\logs\Chatlogs`.
+    pub chatlogs_dir: Option<String>,
+    /// Whether incoming intel plays an alarm sound.
+    pub alarm_on: bool,
+    /// Custom sound file path (.wav/.mp3/.m4a); None plays the system chime.
+    pub sound_path: Option<String>,
+    /// Minimum seconds between audio alarms.
+    pub cooldown_s: u32,
+    /// Comma-separated keywords that suppress alarms (e.g. `clr, clear`).
+    pub ignore_words: String,
+    /// Show a pop-up notice on the collapsed island when intel triggers.
+    pub popup_notice: bool,
+}
+
+impl Default for EveIntelSettings {
+    fn default() -> Self {
+        Self {
+            channel: String::new(),
+            chatlogs_dir: None,
+            alarm_on: true,
+            sound_path: None,
+            cooldown_s: 5,
+            ignore_words: crate::eve_intel::DEFAULT_IGNORE_WORDS.into(),
+            popup_notice: true,
+        }
+    }
 }
 
 /// What the AI tab shows and whether it gives heads-up notices.
@@ -298,6 +334,7 @@ impl Default for Settings {
             record: RecordSettings::default(),
             notifications: crate::notifications::NotificationSettings::default(),
             ielts_spice: Spice::default(),
+            eve_intel: EveIntelSettings::default(),
         }
     }
 }
@@ -405,6 +442,7 @@ impl Settings {
         p.long_break_min = p.long_break_min.clamp(1, 120);
         p.long_every = p.long_every.min(12);
         self.prayer.remind_before_min = self.prayer.remind_before_min.min(60);
+        self.eve_intel.cooldown_s = self.eve_intel.cooldown_s.min(300);
         self
     }
 }

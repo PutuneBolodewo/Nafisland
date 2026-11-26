@@ -15,6 +15,7 @@ pub mod cities;
 pub mod downloader;
 #[cfg(test)]
 mod downloader_live;
+pub mod eve_intel;
 pub mod http;
 pub mod ielts;
 pub mod imaging;
@@ -65,6 +66,8 @@ pub struct Services {
     /// Started the first time the AI tab opens or its notices are on
     /// ([`Services::usage_watch`]).
     usage: std::cell::OnceCell<Option<usage::UsageService>>,
+    /// Started the first time the EVE Intel add-on is switched on.
+    eve_intel: std::cell::OnceCell<Option<eve_intel::EveIntelService>>,
     sink: EventSink,
 }
 
@@ -104,7 +107,7 @@ impl Services {
             .map(|a| a.id)
             .collect();
         let addons = started("add-ons", addons::AddonService::start(sink.clone(), on));
-        Self { media, lyrics, _audio: audio, _bluetooth: bluetooth, fullscreen, oyenza, pairdrop, addons, stocks: std::cell::OnceCell::new(), usage: std::cell::OnceCell::new(), downloader: std::cell::OnceCell::new(), sink: sink.clone() }
+        Self { media, lyrics, _audio: audio, _bluetooth: bluetooth, fullscreen, oyenza, pairdrop, addons, stocks: std::cell::OnceCell::new(), usage: std::cell::OnceCell::new(), downloader: std::cell::OnceCell::new(), eve_intel: std::cell::OnceCell::new(), sink: sink.clone() }
     }
 
     pub fn stop(self, _helper: HWND) {
@@ -217,6 +220,17 @@ impl Services {
     pub fn usage_cmd(&self, c: UsageCmd) {
         if let Some(s) = self.usage.get_or_init(|| started("usage", usage::UsageService::start(self.sink.clone()))) {
             s.command(c);
+        }
+    }
+
+    /// Start or update the EVE Online chatlog watcher. Never spawns a thread
+    /// while the add-on is off and no channel is watched.
+    pub fn eve_intel_watch(&self, w: eve_intel::Watch) {
+        if !w.active && self.eve_intel.get().is_none() {
+            return;
+        }
+        if let Some(s) = self.eve_intel.get_or_init(|| started("eve_intel", eve_intel::EveIntelService::start(self.sink.clone()))) {
+            s.set_watch(w);
         }
     }
 

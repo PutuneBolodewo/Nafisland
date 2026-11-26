@@ -379,6 +379,20 @@ pub struct PageUiState {
     pub notes_kept: bool,
     /// The Pro add-on whose "what it does" page shows on the Add-ons page.
     pub addon_about: Option<&'static str>,
+    /// The EVE Intel page's channel text field and feed scroll offset.
+    pub eve_channel_input: String,
+    pub eve_feed_scroll: f32,
+}
+
+/// Runtime state for the EVE Online Intel Tool add-on (never persisted).
+#[derive(Clone, Debug, Default)]
+pub struct EveIntelState {
+    pub filename: Option<String>,
+    pub listener: Option<String>,
+    pub error: Option<String>,
+    pub messages: Vec<poni_core::eve_intel::ChatMessage>,
+    pub last_alarm_at: f64,
+    pub sso_note: Option<String>,
 }
 
 /// Whether Windows lets Oyenza Studio read a game's frames. Its event tracing
@@ -846,6 +860,8 @@ pub struct AppState {
     pub ielts: poni_core::ielts::Coach,
     /// The Notes page's meeting (the Meeting notes add-on).
     pub notes: poni_core::notes::Taker,
+    /// EVE Online Intel Tool runtime state.
+    pub eve_intel: EveIntelState,
     /// Side effects requested during the frame.
     pub cmds: Vec<Command>,
 }
@@ -882,6 +898,7 @@ impl AppState {
         } else {
             &settings.start_page
         });
+        let eve_channel_input = settings.eve_intel.channel.clone();
         let mut st = Self {
             settings,
             store,
@@ -900,7 +917,7 @@ impl AppState {
             game: GameState::default(),
             shelf_thumbs: HashMap::new(),
             app_icons: HashMap::new(),
-            ui: PageUiState::default(),
+            ui: PageUiState { eve_channel_input, ..PageUiState::default() },
             accent: palette::BLUE,
             horizon_star: Default::default(),
             health: None,
@@ -929,6 +946,7 @@ impl AppState {
             usage: UsageState::default(),
             ielts: Default::default(),
             notes: Default::default(),
+            eve_intel: EveIntelState::default(),
             cmds: Vec::new(),
         };
         // A list from a hand-edited file keeps to codes, each once, ten at most.
@@ -957,6 +975,7 @@ impl AppState {
             PageKind::Ielts => !st.ielts_on(),
             PageKind::Notes => !st.notes_on(),
             PageKind::Ai => !st.ai_usage_on(),
+            PageKind::EveIntel => !st.eve_intel_on(),
             p => st.tab_hidden(p),
         };
         if off {
@@ -1069,6 +1088,11 @@ impl AppState {
     /// The Meeting notes add-on is removed in this build.
     pub fn notes_on(&self) -> bool {
         false
+    }
+
+    /// EVE Online Intel Tool add-on is ready when switched on.
+    pub fn eve_intel_on(&self) -> bool {
+        self.addon(poni_core::addons::EVE_INTEL.id) == AddonStatus::Ready
     }
 
     /// Prayer times is built in and ready once its places are loaded.

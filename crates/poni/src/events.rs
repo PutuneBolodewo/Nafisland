@@ -207,4 +207,8 @@ pub enum AppEvent {
     /// The meeting's recording stopped by itself: the longest meeting taken,
     /// or the disk wouldn't take more (`services::notes`).
     NotesStopped(poni_core::notes::CaptureIssue),
+    /// EVE Online Intel Tool watcher and file-picker updates (`services::eve_intel`).
+    EveIntel(crate::services::eve_intel::EveIntelEvent),
+    /// Custom EVE Intel alarm sound finished playing.
+    EveAlarmEnded,
 }

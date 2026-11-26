@@ -157,12 +157,13 @@ pub enum Section {
     Prayer,
     Caffeine,
     Ai,
+    EveIntel,
     Oyenza,
     About,
 }
 
 impl Section {
-    pub const ALL: [Section; 13] = [
+    pub const ALL: [Section; 14] = [
         Section::General,
         Section::Appearance,
         Section::Island,
@@ -174,6 +175,7 @@ impl Section {
         Section::Prayer,
         Section::Caffeine,
         Section::Ai,
+        Section::EveIntel,
         Section::Oyenza,
         Section::About,
     ];
@@ -191,6 +193,7 @@ impl Section {
             Section::Prayer => "Prayer times",
             Section::Caffeine => "Caffeine",
             Section::Ai => "AI usage",
+            Section::EveIntel => "EVE Intel",
             Section::Oyenza => "Oyenza account",
             Section::About => "About",
         }
@@ -210,6 +213,7 @@ impl Section {
             Section::Prayer => "prayer",
             Section::Caffeine => "caffeine",
             Section::Ai => "ai",
+            Section::EveIntel => "eveintel",
             Section::Oyenza => "oyenza",
             Section::About => "about",
         }
@@ -228,6 +232,7 @@ impl Section {
             Section::Prayer => Icon::Moon,
             Section::Caffeine => Icon::Coffee,
             Section::Ai => Icon::Ai,
+            Section::EveIntel => Icon::Eye,
             Section::Oyenza => Icon::Oyenza,
             Section::About => Icon::Gear,
         }
@@ -247,6 +252,7 @@ impl Section {
             Section::Prayer => Color::hex(0x30B0A0),
             Section::Caffeine => Color::hex(0xA2845E),
             Section::Ai => palette::PURPLE,
+            Section::EveIntel => palette::RED,
             Section::Oyenza => palette::ORANGE,
             Section::About => Color::hex(0x8E8E93),
         }
@@ -259,6 +265,7 @@ impl Section {
             Section::Prayer => st.prayer_on(),
             Section::Caffeine => st.caffeine_on(),
             Section::Ai => st.ai_usage_on(),
+            Section::EveIntel => st.eve_intel_on(),
             _ => true,
         }
     }
@@ -314,6 +321,15 @@ pub enum Key {
     CaffeineRemind,
     AiNotices,
     AiNear,
+    EveFolder,
+    EveFolderReset,
+    EveAlarmOn,
+    EveSoundPick,
+    EveSoundReset,
+    EveSoundTest,
+    EveCooldown,
+    EvePopup,
+    EveIgnoreClr,
     SettingsFile,
     DataFolder,
     ReleaseNotes,
@@ -620,6 +636,48 @@ pub fn blocks(section: Section, st: &AppState) -> Vec<Block> {
                 Block::Note("Add what you drink on the island's Caffeine page."),
             ]
         }
+        Section::EveIntel => {
+            let e = &s.eve_intel;
+            let folder_sub = e
+                .chatlogs_dir
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| "Default (%USERPROFILE%\\Documents\\EVE\\logs\\Chatlogs)".to_string());
+            let mut folder_rows = vec![item(Key::EveFolder, "Chatlogs folder", Some(&folder_sub), Ctl::Button("Choose…"))];
+            if e.chatlogs_dir.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+                folder_rows.push(item(Key::EveFolderReset, "Reset folder", Some("Use Documents\\EVE\\logs\\Chatlogs"), Ctl::Button("Reset")));
+            }
+
+            let sound_sub = e
+                .sound_path
+                .as_deref()
+                .filter(|p| !p.trim().is_empty())
+                .and_then(|p| std::path::Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()))
+                .unwrap_or_else(|| "Default system chime".to_string());
+            let cooldown = if e.cooldown_s == 0 { "Off".to_string() } else { format!("{} s", e.cooldown_s) };
+            let mut alarm_rows = vec![
+                switch(Key::EveAlarmOn, "Audio alarm", Some("Play an alarm sound when new intel arrives"), e.alarm_on),
+                item(Key::EveSoundPick, "Custom alarm sound", Some(&sound_sub), Ctl::Button("Choose…")),
+            ];
+            if e.sound_path.as_deref().is_some_and(|p| !p.trim().is_empty()) {
+                alarm_rows.push(item(Key::EveSoundReset, "Clear custom sound", Some("Revert to the default system chime"), Ctl::Button("Reset")));
+            }
+            alarm_rows.push(item(Key::EveSoundTest, "Test alarm", Some("Play the selected sound now"), Ctl::Button("Play")));
+            alarm_rows.push(item(Key::EveCooldown, "Alarm cooldown", Some("Minimum gap between repeated sounds"), Ctl::Stepper(cooldown)));
+
+            let ignore_clr = !e.ignore_words.trim().is_empty();
+            let alert_rows = vec![
+                switch(Key::EvePopup, "Collapsed island pop-up", Some("Show an alert banner on the closed island"), e.popup_notice),
+                switch(Key::EveIgnoreClr, "Ignore clear reports (clr)", Some("Skip alarms for messages containing clr or clear"), ignore_clr),
+            ];
+            vec![
+                Block::Group(Some("Chatlogs"), folder_rows),
+                Block::Group(Some("Alarm and sound"), alarm_rows),
+                Block::Group(Some("Alerts"), alert_rows),
+                Block::Note("Set the channel name on the island's EVE Intel tab."),
+            ]
+        }
         Section::Oyenza => vec![Block::Account],
         Section::About => vec![
             Block::Version,
@@ -800,6 +858,34 @@ pub fn apply(st: &mut AppState, key: Key, act: Act) {
         Key::CaffeineRemind => s.caffeine.remind = !s.caffeine.remind,
         Key::AiNotices => s.usage.notices = !s.usage.notices,
         Key::AiNear => s.usage.near_pct = (s.usage.near_pct as i32 + step * 5).clamp(50, 95) as u8,
+        Key::EveFolder => {
+            st.cmd(Command::EveIntel(crate::commands::EveIntelCmd::PickDir));
+            return;
+        }
+        Key::EveFolderReset => {
+            s.eve_intel.chatlogs_dir = None;
+        }
+        Key::EveAlarmOn => s.eve_intel.alarm_on = !s.eve_intel.alarm_on,
+        Key::EveSoundPick => {
+            st.cmd(Command::EveIntel(crate::commands::EveIntelCmd::PickSound));
+            return;
+        }
+        Key::EveSoundReset => {
+            s.eve_intel.sound_path = None;
+        }
+        Key::EveSoundTest => {
+            st.cmd(Command::EveIntel(crate::commands::EveIntelCmd::TestAlarm));
+            return;
+        }
+        Key::EveCooldown => s.eve_intel.cooldown_s = (s.eve_intel.cooldown_s as i32 + step * 5).clamp(0, 60) as u32,
+        Key::EvePopup => s.eve_intel.popup_notice = !s.eve_intel.popup_notice,
+        Key::EveIgnoreClr => {
+            s.eve_intel.ignore_words = if s.eve_intel.ignore_words.trim().is_empty() {
+                poni_core::eve_intel::DEFAULT_IGNORE_WORDS.into()
+            } else {
+                String::new()
+            };
+        }
         Key::SettingsFile => {
             st.cmd(Command::OpenPath(crate::paths::settings_path().to_string_lossy().into_owned()));
             return;
@@ -1852,10 +1938,26 @@ mod tests {
                     // Start with Windows waits for its reading; the buttons open things.
                     Key::Autostart => assert!(st.cmds.is_empty()),
                     Key::SettingsFile | Key::DataFolder | Key::ReleaseNotes | Key::LyricsCredit => assert!(opens, "{:?}", it.key),
+                    Key::EveFolder | Key::EveSoundPick | Key::EveSoundTest => {
+                        assert!(st.cmds.iter().any(|c| matches!(c, Command::EveIntel(_))), "{:?}", it.key)
+                    }
                     _ => assert!(saved, "{:?} didn't save", it.key),
                 }
             }
         }
+    }
+
+    #[test]
+    fn eve_intel_has_a_section_only_while_its_add_on_is_on() {
+        let mut st = state();
+        assert!(!sections(&st).contains(&Section::EveIntel));
+        st.settings.set_addon(poni_core::addons::EVE_INTEL.id, true);
+        st.addons.insert(poni_core::addons::EVE_INTEL.id, poni_core::addons::Status::Ready);
+        assert!(sections(&st).contains(&Section::EveIntel));
+        apply(&mut st, Key::EveCooldown, Act::Step(1));
+        assert_eq!(st.settings.eve_intel.cooldown_s, 10);
+        apply(&mut st, Key::EveIgnoreClr, Act::Toggle);
+        assert!(st.settings.eve_intel.ignore_words.is_empty());
     }
 
     #[test]

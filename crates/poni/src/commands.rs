@@ -197,6 +197,8 @@ pub enum Command {
     SaveSettings,
     /// Open the Settings window, or bring it forward (the gear, Windows).
     OpenSettings,
+    /// Open the Settings window directly on `Section`.
+    OpenSettingsSection(crate::settings_window::Section),
     SetPage(PageKind),
     /// Keep the island open even when the cursor leaves.
     SetPinned(bool),
@@ -238,6 +240,18 @@ pub enum Command {
     Usage(UsageCmd),
     /// The Downloads page (`pages::downloads`).
     Download(DownloadCmd),
+    /// EVE Online Intel Tool actions (`pages::eve_intel` & `settings_window`).
+    EveIntel(EveIntelCmd),
+}
+
+/// Actions requested by the EVE Online Intel Tool page or its Settings section.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EveIntelCmd {
+    SetChannel(String),
+    SsoConnect,
+    TestAlarm,
+    PickSound,
+    PickDir,
 }
 
 /// What the Downloads page asks for.

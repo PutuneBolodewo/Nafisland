@@ -138,6 +138,7 @@ fn icon(a: &Addon) -> Icon {
         "ielts" => Icon::Mic,
         "notes" => Icon::Notes,
         "ai" => Icon::Ai,
+        "eveintel" => Icon::Eye,
         _ => Icon::Addons,
     }
 }

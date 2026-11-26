@@ -3007,9 +3007,14 @@ impl App {
                 // Notifications is a Windows add-on: a Mac can't read other apps' notifications.
                 Command::Notify(_) => {}
                 Command::OpenSettings => self.show_settings(),
+                Command::OpenSettingsSection(sec) => {
+                    self.collapse();
+                    self.open_settings(Some(sec));
+                }
                 Command::Usage(c) => self.usage_cmd(c),
                 Command::Ielts(c) => self.ielts_cmd(c),
                 Command::Notes(c) => self.notes_cmd(c),
+                Command::EveIntel(_) => {}
             }
         }
         self.sync_phone_offer();
@@ -3638,6 +3643,7 @@ impl App {
             PageKind::Downloads => !self.st.downloader_on(),
             PageKind::Notes => !self.st.notes_on(),
             PageKind::Ai => !self.st.ai_usage_on(),
+            PageKind::EveIntel => !self.st.eve_intel_on(),
             _ => false,
         };
         if gone {
