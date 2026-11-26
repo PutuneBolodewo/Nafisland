@@ -94,21 +94,49 @@ pub fn hairline(scale: f32) -> f32 {
 ///
 /// A look with a frame (Diorama's) has its body drawn as that frame round a
 /// pane instead ([`draw_framed_body`]), wherever the island floats.
+fn draw_shell(
+    c: &mut Canvas,
+    body: Rect,
+    radius: f32,
+    border: Option<Color>,
+    shadow: Option<Color>,
+    paint: impl FnOnce(&mut Canvas, Rect, f32),
+) {
+    let body = snap(body, c.scale());
+    let r = radius.min(body.h / 2.0).min(body.w / 2.0).max(0.0);
+    if let Some(sc) = shadow.filter(|_| c.on_gpu()) {
+        c.rrect_shadow(body.offset(0.0, SHADOW_DROP), r, sc, &SHADOW_RAMP);
+    }
+    paint(c, body, r);
+    if let Some(b) = border {
+        hairline_round(c, body, r, b);
+    }
+}
+
 pub fn draw_body(c: &mut Canvas, body: Rect, radius: f32, fill: Color, border: Option<Color>) {
     if let Some(frame) = c.look().frame {
         draw_framed_body(c, body, radius, fill, border, &frame);
         return;
     }
-    let s = c.scale();
-    let body = snap(body, s);
-    let r = radius.min(body.h / 2.0).min(body.w / 2.0).max(0.0);
-    if c.on_gpu() && casts_shadow(fill) {
-        c.rrect_shadow(body.offset(0.0, SHADOW_DROP), r, Color::black(fill.a), &SHADOW_RAMP);
-    }
-    c.path(&segments(body, r), Some(fill), None);
-    if let Some(b) = border {
-        hairline_round(c, body, r, b);
-    }
+    let shadow = casts_shadow(fill).then_some(Color::black(fill.a));
+    draw_shell(c, body, radius, border, shadow, |c, body, r| {
+        c.path(&segments(body, r), Some(fill), None);
+    });
+}
+
+/// Floating pill outline filled with the Horizon sky gradient, stars, and landscape.
+pub fn draw_horizon_body(
+    c: &mut Canvas,
+    st: &crate::state::AppState,
+    body: Rect,
+    radius: f32,
+    border: Option<Color>,
+) {
+    draw_shell(c, body, radius, border, Some(Color::black(1.0)), |c, body, r| {
+        c.push_outline_mask(&segments(body, r));
+        super::horizon::draw_sky(c, st, body, 0.0);
+        c.pop_shape_mask();
+    });
 }
 
 /// A `border` hairline all the way round, just inside `body`'s edge.

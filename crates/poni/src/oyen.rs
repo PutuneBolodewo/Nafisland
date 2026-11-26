@@ -1,13 +1,7 @@
-//! The Oyen theme: Oyen, the Oyenza cat, living in the island.
+//! The Mascot theme: Nafisland's bull mascot living in the island.
 //!
-//! Oyen is drawn from the Oyenza app's own built face ([`poni_core::oyen`]),
-//! never from a picture, so he is the same character, with the same moods, as
-//! in the app. He peeks over a line near the island's bottom edge the way the
-//! Oyenza Studio logo does, his chin hidden behind it. (The logo's cream paws are
-//! left out: at island size they read as teeth, and Oyen has no mouth.)
-//!
-//! Moods only ever follow what the island is doing (resting, music, the
-//! cursor, the night), never an amount of money.
+//! Drawn from [`poni_core::oyen`] with the dark head, curved white horns,
+//! floppy ears, peach snout, and expressive eyes across all moods.
 
 use crate::gfx::Canvas;
 use poni_core::geom::{Color, Point, Rect};
@@ -18,25 +12,28 @@ use std::f32::consts::TAU;
 use std::f64::consts::PI;
 use std::sync::OnceLock;
 
-/// Oyen's orange: the theme's accent.
+/// Warm theme accent kept for the mascot theme.
 pub const ORANGE: Color = Color::hex(oyen::ORANGE);
 const FOLD: Color = Color::hex(oyen::FOLD_ORANGE);
+const BULL_HEAD: Color = Color::hex(oyen::BULL_HEAD);
+const BULL_STROKE: Color = Color::hex(oyen::BULL_STROKE);
+const BULL_HORN: Color = Color::hex(oyen::BULL_HORN);
+const BULL_HORN_STROKE: Color = Color::hex(oyen::BULL_HORN_STROKE);
+const BULL_SNOUT: Color = Color::hex(oyen::BULL_SNOUT);
 const INK: Color = Color::hex(oyen::INK);
 const PINK: Color = Color::hex(oyen::PINK);
 const GREEN: Color = Color::hex(oyen::GREEN);
-/// The Oyenza app icon's ground.
-const ICON_TILE: Color = Color::hex(0x171717);
 /// Shapes that float around the head (thinking dots, z's) are ink on a light
-/// page; on the black island they need to be light.
+/// page; on a dark island they need to be light.
 const FLOAT: Color = Color::white(0.85);
 const FLOAT_ON_LIGHT: f32 = 0.85;
 
-/// The mark's head is 104 units wide. The logo's island bar starts at y 23,
-/// just under the eyes.
+/// The mark's horns/ears span 104 units wide. Peeking stops at `y = 30`,
+/// showing the horns, ears, eyes, and upper snout with nostrils.
 const MARK_W: f32 = 104.0;
-const BAR_TOP: f32 = 23.0;
-/// The mark's small cut grows the eyes for sizes of 32 px and below.
-const SMALL_EYES: f64 = 1.19;
+const BAR_TOP: f32 = 30.0;
+/// Slightly larger eyes for 32 px and below.
+const SMALL_EYES: f64 = 1.08;
 
 /// How long one rest cycle lasts: a blink at its start, an ear flick every
 /// third cycle. Between moves Oyen is a still frame, so the app sleeps.
@@ -435,29 +432,87 @@ fn talk(t: f64, eyes: f64) -> Frame {
     f
 }
 
-/// Oyen whole and still, as on the Oyenza mark: his head `w` DIPs wide, head
-/// and ears centred on `center`. The mark fits a 108-unit square whose
-/// middle is 12 units above its origin.
-fn badge(c: &mut Canvas, center: Point, w: f32) {
-    let k = w / MARK_W;
-    let eyes = if w * c.scale() <= 32.0 { SMALL_EYES } else { 1.0 };
-    let frame = oyen::frame(Mood::Oyen, 0.0, Input::default(), eyes);
-    draw(c, &frame, Point::new(center.x, center.y + 12.0 * k), k);
+/// Rounded rectangle outline (clockwise) for clipping `app_icon`.
+fn rrect_segs(r: Rect, radius: f32) -> [Seg; 10] {
+    let rad = radius.min(r.w / 2.0).min(r.h / 2.0).max(0.0);
+    let (x0, y0, x1, y1) = (r.x, r.y, r.right(), r.bottom());
+    [
+        Seg::MoveTo(x0 + rad, y0),
+        Seg::LineTo(x1 - rad, y0),
+        Seg::ArcTo(rad, rad, 0.0, false, true, x1, y0 + rad),
+        Seg::LineTo(x1, y1 - rad),
+        Seg::ArcTo(rad, rad, 0.0, false, true, x1 - rad, y1),
+        Seg::LineTo(x0 + rad, y1),
+        Seg::ArcTo(rad, rad, 0.0, false, true, x0, y1 - rad),
+        Seg::LineTo(x0, y0 + rad),
+        Seg::ArcTo(rad, rad, 0.0, false, true, x0 + rad, y0),
+        Seg::Close,
+    ]
 }
 
-/// The Oyenza app's icon, `size` DIPs square and centred on `center`: Oyen on
-/// the icon's near-black tile (catat assets/images/icon.png: his head is
-/// 61.7 % of the tile, his middle 1.3 % below its centre), with the rounded
-/// corners phones give it. Its own colours in every theme.
+/// The Horizon Island app icon, `size` DIPs square and centred on `center`.
 pub fn app_icon(c: &mut Canvas, center: Point, size: f32) {
     let tile = Rect::new(center.x - size / 2.0, center.y - size / 2.0, size, size);
-    c.unthemed(|c| c.fill_rrect(tile, size * 0.2237, ICON_TILE));
-    badge(c, Point::new(center.x, center.y + 0.013 * size), 0.617 * size);
+    let k = size / 464.0;
+    let map_x = |x: f32| tile.x + (x - 24.0) * k;
+    let map_y = |y: f32| tile.y + (y - 24.0) * k;
+
+    c.unthemed(|c| {
+        c.push_outline_mask(&rrect_segs(tile, 112.0 * k));
+        c.fill_linear_gradient_stops(
+            tile,
+            &[
+                (0.0, Color::hex(0x0B132B)),
+                (0.55, Color::hex(0x1C3D72)),
+                (1.0, Color::hex(0xF59E0B)),
+            ],
+        );
+        c.fill_circle(Point::new(map_x(256.0), map_y(340.0)), 88.0 * k, Color::hex(0xFBBF24));
+
+        // Island silhouette at bottom
+        let island = [
+            Seg::MoveTo(map_x(24.0), map_y(388.0)),
+            Seg::QuadTo(map_x(156.0), map_y(320.0), map_x(256.0), map_y(356.0)),
+            Seg::QuadTo(map_x(364.0), map_y(394.0), map_x(488.0), map_y(334.0)),
+            Seg::LineTo(map_x(488.0), map_y(488.0)),
+            Seg::LineTo(map_x(24.0), map_y(488.0)),
+            Seg::Close,
+        ];
+        c.path(&island, Some(Color::hex(0x090D16)), None);
+
+        // Top hanging notch
+        let notch = [
+            Seg::MoveTo(map_x(104.0), map_y(24.0)),
+            Seg::QuadTo(map_x(122.0), map_y(24.0), map_x(122.0), map_y(42.0)),
+            Seg::LineTo(map_x(122.0), map_y(86.0)),
+            Seg::QuadTo(map_x(122.0), map_y(120.0), map_x(156.0), map_y(120.0)),
+            Seg::LineTo(map_x(356.0), map_y(120.0)),
+            Seg::QuadTo(map_x(390.0), map_y(120.0), map_x(390.0), map_y(86.0)),
+            Seg::LineTo(map_x(390.0), map_y(42.0)),
+            Seg::QuadTo(map_x(390.0), map_y(24.0), map_x(408.0), map_y(24.0)),
+            Seg::Close,
+        ];
+        c.path(&notch, Some(Color::hex(0x09090B)), None);
+
+        if size >= 20.0 {
+            c.fill_rrect(
+                Rect::new(map_x(148.0), map_y(48.0), 46.0 * k, 46.0 * k),
+                12.0 * k,
+                Color::hex(0x38BDF8),
+            );
+            for (bx, by, bh) in [(296.0, 64.0, 16.0), (314.0, 54.0, 36.0), (332.0, 60.0, 24.0), (350.0, 50.0, 44.0)] {
+                c.fill_rrect(
+                    Rect::new(map_x(bx), map_y(by), 10.0 * k, bh * k),
+                    5.0 * k,
+                    Color::hex(0xFBBF24),
+                );
+            }
+        }
+        c.pop_shape_mask();
+    });
 }
 
-/// One frame of the face, the mark's (0, 0) at `origin`, `k` DIPs per unit.
-/// Same layering as the app: a raised ear tip behind the head, a folded one
-/// on it, then eyes and extras. Oyen keeps his own colours in every theme.
+/// One frame of the bull mascot, the mark's (0, 0) at `origin`, `k` DIPs per unit.
 fn draw(c: &mut Canvas, f: &Frame, origin: Point, k: f32) {
     let look = c.look();
     let float = if look.light { look.ink.with_alpha(FLOAT_ON_LIGHT) } else { FLOAT };
@@ -470,19 +525,19 @@ fn draw_face(c: &mut Canvas, f: &Frame, origin: Point, k: f32, float: Color) {
         let q = h.apply(p);
         Point::new(origin.x + q.x as f32 * k, origin.y + q.y as f32 * k)
     };
-    // Strokes scale with the head (it squashes a few percent when bouncing).
     let stroke_k = k * ((h.a * h.d - h.b * h.c).abs().sqrt() as f32);
-    let tip = if f.tip.faces_up { ORANGE } else { FOLD };
-    if f.tip.behind_head {
-        c.path(&segs(&f.tip.path, &map), Some(tip), None);
-    }
-    c.path(&segs(oyen::head_path(), &map), Some(ORANGE), None);
-    if !f.tip.behind_head {
-        c.path(&segs(&f.tip.path, &map), Some(tip), None);
-    }
+    let head_stroke = Some((BULL_STROKE, 1.2 * stroke_k));
+
+    c.path(&segs(oyen::right_ear_path(), &map), Some(BULL_HEAD), head_stroke);
+    c.path(&segs(&f.tip.path, &map), Some(BULL_HEAD), head_stroke);
+    c.path(&segs(oyen::head_path(), &map), Some(BULL_HEAD), head_stroke);
+    c.path(&segs(oyen::horns_path(), &map), Some(BULL_HORN), Some((BULL_HORN_STROKE, 1.4 * stroke_k)));
+    c.path(&segs(oyen::snout_path(), &map), Some(BULL_SNOUT), None);
+    c.path(&segs(oyen::nostrils_path(), &map), Some(INK), None);
+
     for s in f.eyes.iter().chain(&f.extras) {
         let color = match s.paint {
-            Paint::Ink if s.place == Place::Eye => INK,
+            Paint::Ink if matches!(s.place, Place::Eye | Place::Highlight) => INK,
             Paint::Ink => float,
             Paint::Pink => PINK,
             Paint::Green => GREEN,

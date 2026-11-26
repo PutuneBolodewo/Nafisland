@@ -46,6 +46,9 @@ pub enum Theme {
     /// Horizon: a Classic-shaped island whose gradient sky and celestial icons
     /// follow the five phases of the day, synced with Prayer Times.
     Horizon,
+    /// Horizon Pill: the Pill theme's floating capsule and rounded cards,
+    /// painted with Horizon's dynamic 5-phase sky and celestial icons.
+    HorizonPill,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -533,8 +536,9 @@ mod tests {
             Theme::Pill => "pill",
             Theme::Diorama => "diorama",
             Theme::Horizon => "horizon",
+            Theme::HorizonPill => "horizon_pill",
         };
-        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill, Theme::Diorama, Theme::Horizon] {
+        for theme in [Theme::Classic, Theme::Oyen, Theme::Glass, Theme::Pill, Theme::Diorama, Theme::Horizon, Theme::HorizonPill] {
             let s = Settings { theme, ..Settings::default() };
             let j = serde_json::to_string(&s).unwrap();
             assert!(j.contains(&format!(r#""theme":"{}""#, name(theme))), "{theme:?}: {j}");

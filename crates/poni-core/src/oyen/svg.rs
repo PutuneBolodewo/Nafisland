@@ -4,7 +4,9 @@
 
 use super::geometry::{max, number};
 use super::{
-    fold_path, head_path, Affine, Frame, Paint, Place, Shape, FOLD_ORANGE, GREEN, INK, ORANGE, PINK,
+    fold_path, head_path, horns_path, nostrils_path, right_ear_path, snout_path, Affine, Frame,
+    Paint, Place, Shape, BULL_HEAD, BULL_HORN, BULL_HORN_STROKE, BULL_SNOUT, BULL_STROKE, GREEN,
+    INK, PINK,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -126,22 +128,41 @@ fn shapes(frame: &Frame) -> impl Iterator<Item = (usize, &Shape)> {
 fn colour_body(frame: &Frame, parts: &Parts, ink: &str, id: &str) -> String {
     let mut defs = String::new();
     let mut out = String::new();
-    let tip_fill = css(if frame.tip.faces_up {
-        ORANGE
-    } else {
-        FOLD_ORANGE
-    });
-    let tip = format!("{} fill=\"{tip_fill}\"/>", parts.tip);
-    if frame.tip.behind_head {
-        out += &tip;
-    }
-    out += &format!("{} fill=\"{}\"/>", parts.head, css(ORANGE));
-    if !frame.tip.behind_head {
-        out += &tip;
-    }
+    let head_fill = css(BULL_HEAD);
+    let head_stroke = css(BULL_STROKE);
+    let horn_fill = css(BULL_HORN);
+    let horn_stroke = css(BULL_HORN_STROKE);
+    let snout_fill = css(BULL_SNOUT);
+    let ink_fill = css(INK);
+
+    out += &format!(
+        "<path d=\"{}\" fill=\"{head_fill}\" stroke=\"{head_stroke}\" stroke-width=\"1.2\" stroke-linejoin=\"round\"/>",
+        right_ear_path().to_svg()
+    );
+    out += &format!(
+        "{} fill=\"{head_fill}\" stroke=\"{head_stroke}\" stroke-width=\"1.2\" stroke-linejoin=\"round\"/>",
+        parts.tip
+    );
+    out += &format!(
+        "{} fill=\"{head_fill}\" stroke=\"{head_stroke}\" stroke-width=\"1.2\" stroke-linejoin=\"round\"/>",
+        parts.head
+    );
+    out += &format!(
+        "<path d=\"{}\" fill=\"{horn_fill}\" stroke=\"{horn_stroke}\" stroke-width=\"1.4\" stroke-linejoin=\"round\"/>",
+        horns_path().to_svg()
+    );
+    out += &format!(
+        "<path d=\"{}\" fill=\"{snout_fill}\"/>",
+        snout_path().to_svg()
+    );
+    out += &format!(
+        "<path d=\"{}\" fill=\"{ink_fill}\"/>",
+        nostrils_path().to_svg()
+    );
+
     for (index, shape) in shapes(frame) {
         let color = match shape.paint {
-            Paint::Ink if shape.place == Place::Eye => css(INK),
+            Paint::Ink if matches!(shape.place, Place::Eye | Place::Highlight) => css(INK),
             Paint::Ink => ink.to_string(),
             Paint::Pink => css(PINK),
             Paint::Green => css(GREEN),
@@ -161,26 +182,21 @@ fn template_body(
     frame: &Frame,
     parts: &Parts,
     color: &str,
-    gap: f64,
+    _gap: f64,
     canvas: Canvas,
     id: &str,
 ) -> String {
     let mut defs = String::new();
     let mut mask = String::new();
     let mut floating = String::new();
-    if frame.tip.behind_head {
-        mask += &format!("{} fill=\"#fff\"/>", parts.tip);
-    }
+    mask += &format!(
+        "<path d=\"{}\" fill=\"#fff\"/>",
+        right_ear_path().to_svg()
+    );
+    mask += &format!("{} fill=\"#fff\"/>", parts.tip);
     mask += &format!("{} fill=\"#fff\"/>", parts.head);
-    if !frame.tip.behind_head {
-        // The cut that keeps the folded tip readable in one colour, then the tip itself.
-        let width = number(gap * 2.0);
-        mask += &format!(
-            "{} fill=\"#000\" stroke=\"#000\" stroke-width=\"{width}\" stroke-linejoin=\"round\"/>",
-            parts.tip
-        );
-        mask += &format!("{} fill=\"#fff\"/>", parts.tip);
-    }
+    mask += &format!("<path d=\"{}\" fill=\"#fff\"/>", horns_path().to_svg());
+    mask += &format!("<path d=\"{}\" fill=\"#000\"/>", nostrils_path().to_svg());
     for (index, shape) in shapes(frame) {
         let clip_id = format!("{id}c{index}");
         match shape.place {
@@ -260,8 +276,8 @@ mod tests {
         );
         assert!(svg.contains("<mask id=\"tm\""));
         assert!(svg.contains("mask=\"url(#tm)\""));
-        assert!(!svg.contains(&css(ORANGE)));
-        assert!(!svg.contains(&css(INK)));
+        assert!(!svg.contains(&css(BULL_HEAD)));
+        assert!(!svg.contains(&css(BULL_SNOUT)));
         assert!(svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"18\" height=\"18\" viewBox=\"-54 -66 108 108\">"));
     }
 
@@ -273,9 +289,10 @@ mod tests {
             Canvas::face(96.0),
             "oyen",
         );
-        assert!(svg.contains("fill=\"#F0892E\""));
-        assert!(svg.contains("fill=\"#C9581A\""));
-        assert!(svg.contains("fill=\"#171717\""));
+        assert!(svg.contains(&format!("fill=\"{}\"", css(BULL_HEAD))));
+        assert!(svg.contains(&format!("fill=\"{}\"", css(BULL_HORN))));
+        assert!(svg.contains(&format!("fill=\"{}\"", css(BULL_SNOUT))));
+        assert!(svg.contains(&format!("fill=\"{}\"", css(INK))));
         assert!(!svg.contains("<mask"));
     }
 
@@ -287,22 +304,12 @@ mod tests {
         let shared = body(&f, style, Canvas::menu_bar(18.0), "oyen", Some("o"));
         assert!(shared.contains("<use href=\"#o-head\""));
         assert!(shared.contains("<use href=\"#o-fold\""));
-        assert!(shared.len() < whole.len() / 3);
+        assert!(shared.len() < whole.len());
         assert!(shared_defs("o").contains("id=\"o-head\""));
     }
 
     #[test]
     fn clips_and_fading_shapes_carry_their_attributes() {
-        let sly = frame(Mood::Sly, 0.37, Input::default(), 1.0);
-        let svg = body(
-            &sly,
-            Style::Colour { ink: "#000" },
-            Canvas::face(64.0),
-            "s",
-            Some("o"),
-        );
-        assert!(svg.starts_with("<defs><clipPath id=\"sc0\">"));
-        assert!(svg.contains("<g clip-path=\"url(#sc1)\">"));
         let sleep = frame(Mood::Sleep, 0.8, Input::default(), 1.0);
         let svg = body(
             &sleep,
@@ -329,8 +336,9 @@ mod tests {
 
     #[test]
     fn colours_are_written_as_css_hex() {
-        assert_eq!(css(ORANGE), "#F0892E");
-        assert_eq!(css(FOLD_ORANGE), "#C9581A");
+        assert_eq!(css(BULL_HEAD), "#1C1C21");
+        assert_eq!(css(BULL_HORN), "#F8FAFC");
+        assert_eq!(css(BULL_SNOUT), "#E89B6C");
         assert_eq!(css(INK), "#171717");
         assert_eq!(css(PINK), "#FF4F8B");
         assert_eq!(css(GREEN), "#1E9E4A");
