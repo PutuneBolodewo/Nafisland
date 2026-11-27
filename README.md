@@ -1,4 +1,4 @@
-<h1 align="center">Nafisland (PulauH)</h1>
+<h1 align="center">Nafisland</h1>
 
 <h3 align="center">A living notch for Windows — lightweight Dynamic Island in Rust with an EVE Online Intel Tool</h3>
 
