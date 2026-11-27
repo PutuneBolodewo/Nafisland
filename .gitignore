@@ -8,3 +8,13 @@
 /after
 /ci-artifacts
 /_site
+
+# Secrets and local credentials
+.env
+.env.*
+*.pem
+*.p12
+*.pfx
+*.key
+*.keystore
+.secrets/

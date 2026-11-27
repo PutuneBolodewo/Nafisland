@@ -308,6 +308,7 @@ pub fn of(theme: Theme) -> &'static Look {
         Theme::Pill => &PILL,
         Theme::Diorama => &DIORAMA_DAY,
         Theme::Horizon => &CLASSIC,
+        Theme::HorizonPill => &HORIZON_PILL_DARK,
     }
 }
 
@@ -324,6 +325,7 @@ pub fn around_notch(theme: Theme) -> &'static Look {
         Theme::Pill => &PILL,
         Theme::Diorama => &DIORAMA_DAY,
         Theme::Horizon => &CLASSIC,
+        Theme::HorizonPill => &HORIZON_PILL_DARK,
     }
 }
 
@@ -353,12 +355,31 @@ pub const HORIZON_DARK: Look = Look {
     swaps: &[],
 };
 
+pub const HORIZON_PILL_LIGHT: Look = Look {
+    shape: Shape::Pill,
+    ..HORIZON_LIGHT
+};
+
+pub const HORIZON_PILL_DARK: Look = Look {
+    shape: Shape::Pill,
+    ..HORIZON_DARK
+};
+
 /// The Horizon look for light (`Morning`) or dark (`Day`, `Dusk`, `Night`, `Midnight`) phases.
 pub fn horizon(light: bool) -> &'static Look {
     if light {
         &HORIZON_LIGHT
     } else {
         &HORIZON_DARK
+    }
+}
+
+/// The floating Pill variant of the Horizon look for light or dark phases.
+pub fn horizon_pill(light: bool) -> &'static Look {
+    if light {
+        &HORIZON_PILL_LIGHT
+    } else {
+        &HORIZON_PILL_DARK
     }
 }
 
@@ -481,6 +502,9 @@ mod tests {
         assert_eq!(*around_notch(Theme::Classic), CLASSIC);
         assert_eq!(*around_notch(Theme::Oyen), OYEN_NIGHT);
         assert_eq!(*around_notch(Theme::Glass), GLASS_DARK);
+        assert_eq!(horizon_pill(true).shape, Shape::Pill);
+        assert_eq!(horizon_pill(false).shape, Shape::Pill);
+        assert!(horizon_pill(true).light && !horizon_pill(false).light);
         // Away from a notch (and on Windows) every theme keeps its look.
         assert_eq!(*of(Theme::Oyen), OYEN);
     }

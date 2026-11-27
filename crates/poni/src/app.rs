@@ -3725,7 +3725,7 @@ impl App {
         }
         let horizon_paused = self.locked || self.display_off || self.st.power.saver || self.fullscreen_hidden;
         let ph = pill::horizon::phase(&self.st);
-        if self.st.settings.theme == Theme::Horizon {
+        if pill::horizon::is_on(self.st.settings.theme) {
             self.st.accent = pill::horizon::palette(&self.st).accent;
         }
         if self.st.horizon_star.tick(self.st.settings.theme, ph, now, horizon_paused) {
@@ -3961,7 +3961,11 @@ impl App {
                     if floating {
                         // Hidden floats nothing: its band takes the mouse.
                         if !hidden_idle {
-                            pill::shape::draw_body(&mut canvas, body, geom.r, island_color, border);
+                            if self.st.settings.theme == Theme::HorizonPill {
+                                pill::shape::draw_horizon_body(&mut canvas, &self.st, body, geom.r, border);
+                            } else {
+                                pill::shape::draw_body(&mut canvas, body, geom.r, island_color, border);
+                            }
                         }
                     } else if self.st.settings.theme == Theme::Horizon && !hidden_idle {
                         canvas.push_outline_mask(&crate::gfx::notch_segments(body, geom.r, SHOULDER));
@@ -5793,7 +5797,7 @@ fn theme_accent(theme: Theme) -> Color {
         poni_core::look::DIORAMA_ACCENT
     } else if theme == Theme::Glass {
         services::system_accent_base().unwrap_or(palette::BLUE)
-    } else if theme == Theme::Horizon {
+    } else if pill::horizon::is_on(theme) {
         poni_core::horizon::palette_at(
             (clock::local_now().hour as f32) * 60.0 + clock::local_now().minute as f32,
             poni_core::horizon::SkySchedule::default(),

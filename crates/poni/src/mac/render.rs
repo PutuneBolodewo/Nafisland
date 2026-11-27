@@ -461,6 +461,8 @@ pub fn run(dir: &str, args: &[String]) -> i32 {
         Some("glass") => Theme::Glass,
         Some("pill") => Theme::Pill,
         Some("diorama") => Theme::Diorama,
+        Some("horizon") => Theme::Horizon,
+        Some("horizon_pill") | Some("horizon-pill") => Theme::HorizonPill,
         _ => Theme::Classic,
     };
     let notch = args.iter().any(|a| a == "--notch").then_some(Notch::MACBOOK);
@@ -470,6 +472,8 @@ pub fn run(dir: &str, args: &[String]) -> i32 {
         Theme::Glass => "-glass",
         Theme::Pill => "-pill",
         Theme::Diorama => "-diorama",
+        Theme::Horizon => "-horizon",
+        Theme::HorizonPill => "-horizon-pill",
     };
     let suffix = format!("{name}{}", if notch.is_some() { "-notch" } else { "" });
     // A home of its own, so add-ons on this Mac don't change the pictures.

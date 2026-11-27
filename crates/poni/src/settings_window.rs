@@ -37,7 +37,7 @@ use std::collections::HashMap;
 /// The card, in DIPs. Windows' window gives it room for its shadow and is
 /// less tall on a short screen (the content scrolls).
 pub const CARD_W: f32 = 840.0;
-pub const CARD_H: f32 = 580.0;
+pub const CARD_H: f32 = 710.0;
 /// Its corners when the window draws its own (Windows).
 const RADIUS: f32 = 14.0;
 const SIDEBAR_W: f32 = 220.0;
@@ -401,13 +401,14 @@ const FULLSCREEN: [(bool, &str); 2] = [(true, "Hide"), (false, "Stay on top")];
 const SOUNDS: [(PrayerSound, &str); 3] = [(PrayerSound::Adzan, "Adzan"), (PrayerSound::Tone, "Tone"), (PrayerSound::Silent, "Silent")];
 /// Whose times and Hijri dates (the Prayer page's place picker has the same).
 const FOLLOWS: [(PrayerFollow, &str); 2] = [(PrayerFollow::Kemenag, "Kemenag"), (PrayerFollow::Muhammadiyah, "Muhammadiyah (KHGT)")];
-const THEMES: [(Theme, &str, &str); 6] = [
+const THEMES: [(Theme, &str, &str); 7] = [
     (Theme::Classic, "Classic", "A black island at the top edge"),
     (Theme::Oyen, poni_core::brand::MASCOT_NAME, "Mascot lives in the island"),
     (Theme::Glass, "Glass", "Frosted glass over your screen"),
     (Theme::Pill, "Pill", "Floats just below the top edge"),
     (Theme::Diorama, "Diorama", "A little place that keeps your day"),
     (Theme::Horizon, "Horizon", "Sky gradient and icons synced to time"),
+    (Theme::HorizonPill, "Horizon Pill", "Floating sky pill synced to time"),
 ];
 /// Start with Windows, or at login on a Mac (its menu bar says so).
 const AUTOSTART: (&str, &str) = if cfg!(target_os = "macos") {
@@ -1883,10 +1884,20 @@ fn draw_theme_preview(c: &mut Canvas, theme: Theme, screen: Rect) {
             c.fill_rrect(body.offset(0.0, 2.0), body.h / 2.0, Color::black(0.25));
             c.image_exact(&image, body, body.h / 2.0);
         }
-        Theme::Horizon => {
-            let body = Rect::new(cx - 38.0, screen.y, 76.0, 22.0);
+        Theme::Horizon | Theme::HorizonPill => {
+            let floating = theme == Theme::HorizonPill;
+            let body = if floating {
+                Rect::new(cx - 38.0, screen.y + THEME_FLOAT, 76.0, 20.0)
+            } else {
+                Rect::new(cx - 38.0, screen.y, 76.0, 22.0)
+            };
             let dawn = poni_core::horizon::palette_at(7.0 * 60.0, poni_core::horizon::SkySchedule::default());
-            c.push_outline_mask(&crate::gfx::notch_segments(body, 9.0, 6.0));
+            if floating {
+                c.fill_rrect(body.offset(0.0, 2.0), 10.0, Color::black(0.25));
+                c.push_outline_mask(&crate::pill::shape::segments(body, 10.0));
+            } else {
+                c.push_outline_mask(&crate::gfx::notch_segments(body, 9.0, 6.0));
+            }
             c.fill_linear_gradient_stops(Rect::new(body.x - 6.0, body.y, body.w + 12.0, body.h), &dawn.stops);
             let m = [
                 poni_core::svgpath::Seg::MoveTo(body.x, body.bottom()),
@@ -2228,12 +2239,13 @@ mod tests {
             Theme::Pill => 3,
             Theme::Diorama => 4,
             Theme::Horizon => 5,
+            Theme::HorizonPill => 6,
         }
     }
 
     #[test]
     fn every_theme_has_a_card_in_the_pickers_order() {
-        assert_eq!(THEMES.map(|t| t.1), ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon"]);
+        assert_eq!(THEMES.map(|t| t.1), ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon", "Horizon Pill"]);
         for (i, (theme, name, line)) in THEMES.iter().enumerate() {
             assert_eq!(place(*theme), i, "{name}");
             assert!(!line.is_empty(), "{name} says what it is");
@@ -2245,10 +2257,11 @@ mod tests {
         // The content column: the card less the sidebar and the padding.
         let r = Rect::new(SIDEBAR_W + PAD, CONTENT_Y, CARD_W - SIDEBAR_W - 2.0 * PAD, block_h(&state(), &Block::Themes));
         let cards: Vec<Rect> = (0..THEMES.len()).map(|i| theme_card(r, i)).collect();
-        // Six themes: three, then three, the same size.
+        // Seven themes: three, three, and one on the third row, all the same size.
         assert_eq!(cards.iter().filter(|c| c.y == cards[0].y).count(), 3);
         assert_eq!(cards.iter().filter(|c| c.y == cards[3].y).count(), 3);
-        assert_eq!(r.h, GROUP_TITLE_H + 2.0 * THEME_CARD_H + THEME_GAP);
+        assert_eq!(cards.iter().filter(|c| c.y == cards[6].y).count(), 1);
+        assert_eq!(r.h, GROUP_TITLE_H + 3.0 * THEME_CARD_H + 2.0 * THEME_GAP);
         for (i, c) in cards.iter().enumerate() {
             assert_eq!((c.w, c.h), (180.0, THEME_CARD_H), "card {i}");
             assert!(c.x >= r.x && c.right() <= r.right() && c.y >= r.y + GROUP_TITLE_H && c.bottom() <= r.bottom(), "card {i} leaves the block: {c:?}");

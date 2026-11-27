@@ -132,7 +132,7 @@ pub fn menu_items(s: &Settings, pinned: bool, oyenza: &OyenzaLink, recorder: boo
         item("Keep island open", MenuCmd::TogglePinned, pinned),
         MenuItem::Sub {
             label: "Theme".into(),
-            items: vec![theme("Classic", Theme::Classic), theme(poni_core::brand::MASCOT_NAME, Theme::Oyen), theme("Glass", Theme::Glass), theme("Pill", Theme::Pill), theme("Diorama", Theme::Diorama), theme("Horizon", Theme::Horizon)],
+            items: vec![theme("Classic", Theme::Classic), theme(poni_core::brand::MASCOT_NAME, Theme::Oyen), theme("Glass", Theme::Glass), theme("Pill", Theme::Pill), theme("Diorama", Theme::Diorama), theme("Horizon", Theme::Horizon), theme("Horizon Pill", Theme::HorizonPill)],
         },
         // The status bar is listed only in Pill, as on the Settings page: the
         // other themes would draw the clock for it (Diorama its picture).
@@ -438,6 +438,7 @@ mod tests {
             Theme::Pill => 3,
             Theme::Diorama => 4,
             Theme::Horizon => 5,
+            Theme::HorizonPill => 6,
         }
     }
 
@@ -457,7 +458,7 @@ mod tests {
 
     #[test]
     fn the_theme_submenu_has_every_theme_and_checks_the_one_in_use() {
-        let names = ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon"];
+        let names = ["Classic", poni_core::brand::MASCOT_NAME, "Glass", "Pill", "Diorama", "Horizon", "Horizon Pill"];
         let choices = theme_choices(&Settings::default());
         assert_eq!(choices.iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), names);
         for (i, (label, cmd, _)) in choices.iter().enumerate() {

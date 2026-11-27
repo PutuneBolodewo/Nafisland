@@ -13,7 +13,7 @@ use crate::state::AppState;
 use crate::ui::Ui;
 use poni_core::datetime::fmt_clock;
 use poni_core::geom::{palette, Color, Rect};
-use poni_core::settings::IdleStyle;
+use poni_core::settings::{IdleStyle, Theme};
 use poni_core::svgpath::Seg;
 
 /// Every resting pill is this tall, and a capsule (radius = height / 2).
@@ -98,26 +98,40 @@ fn battery_state(st: &AppState) -> Option<(u8, bool)> {
     p.has_battery.then_some((p.percent.min(100), p.charging || p.on_ac))
 }
 
+/// Extra width reserved for the celestial icon in Horizon Pill.
+const HORIZON_LEAD: f32 = 20.0;
+
 fn clock_width(st: &AppState) -> f32 {
     let h24 = st.settings.use_24h;
+    let lead = if st.settings.theme == Theme::HorizonPill { HORIZON_LEAD } else { 0.0 };
     if battery_state(st).is_none() {
-        return if h24 { CLOCK_W } else { CLOCK_12H_W };
+        return (if h24 { CLOCK_W } else { CLOCK_12H_W }) + lead;
     }
     let time = if h24 { TIME_SLOT } else { TIME_12H_SLOT };
-    (SIDE + time + MID_GAP + PCT_SLOT + PCT_GAP + BATTERY_W + SIDE).round()
+    (SIDE + lead + time + MID_GAP + PCT_SLOT + PCT_GAP + BATTERY_W + SIDE).round()
 }
 
 /// "13:27" at the left end, "99%" and the battery at the right one (ref2).
-/// Without a battery the time sits alone in the middle.
+/// Without a battery the time sits alone in the middle. In Horizon Pill the
+/// time-of-day celestial icon sits on the left.
 fn draw_clock(ui: &mut Ui, st: &AppState, body: Rect) {
+    let horizon = st.settings.theme == Theme::HorizonPill;
+    if horizon {
+        let icon = super::horizon::celestial_icon(st);
+        let pal = super::horizon::palette(st);
+        let r = Rect::new(body.x + 12.0, body.center().y - 7.0, 14.0, 14.0);
+        ui.c.icon(icon, r, pal.accent);
+    }
+    let lead = if horizon { HORIZON_LEAD } else { 0.0 };
     let time = fmt_clock(&st.local, st.settings.use_24h);
     let ts = TextStyle::headline().tabular().color(Color::white(1.0));
     let Some((percent, charging)) = battery_state(st) else {
-        ui.c.text(&time, body, &ts.center());
+        let r = Rect::new(body.x + lead, body.y, body.w - lead, body.h);
+        ui.c.text(&time, r, &ts.center());
         return;
     };
     let (tw, _) = ui.c.measure(&time, &ts, 400.0);
-    ui.c.text(&time, Rect::new(body.x + SIDE, body.y, tw + 2.0, body.h), &ts);
+    ui.c.text(&time, Rect::new(body.x + SIDE + lead, body.y, tw + 2.0, body.h), &ts);
 
     let cy = body.center().y;
     let glyph = Rect::new(body.right() - SIDE - BATTERY_W, cy - BATTERY_H / 2.0, BATTERY_W, BATTERY_H);
@@ -220,5 +234,14 @@ mod tests {
         // Hidden stays Classic's invisible strip.
         st.settings.idle_style = IdleStyle::Hidden;
         assert_eq!(geom(&st), None);
+    }
+
+    #[test]
+    fn horizon_pill_reserves_room_for_the_celestial_icon() {
+        let mut st = state(true, true);
+        st.settings.theme = Theme::HorizonPill;
+        assert_eq!(geom(&st), Some(Geom::new(172.0, 32.0, 16.0)));
+        st.power.has_battery = false;
+        assert_eq!(geom(&st), Some(Geom::new(104.0, 32.0, 16.0)));
     }
 }

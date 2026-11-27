@@ -46,10 +46,10 @@ use std::sync::atomic::{AtomicU8, Ordering};
 /// The island floats this far below the screen's top edge (DIPs).
 pub const TOP_GAP: f32 = 8.0;
 
-/// The island floats and lays itself out the Pill way: in the Pill theme
-/// and in Diorama, which is Pill with a picture in its resting capsule.
+/// The island floats and lays itself out the Pill way: in Pill, Diorama,
+/// and Horizon Pill.
 pub fn on(theme: Theme) -> bool {
-    matches!(theme, Theme::Pill | Theme::Diorama)
+    matches!(theme, Theme::Pill | Theme::Diorama | Theme::HorizonPill)
 }
 
 /// The look the island paints in this frame: the theme's
@@ -68,6 +68,7 @@ pub fn look(st: &AppState, around_notch: bool) -> &'static poni_core::look::Look
             poni_core::look::diorama(night)
         }
         Theme::Horizon => poni_core::look::horizon(horizon::palette(st).light),
+        Theme::HorizonPill => poni_core::look::horizon_pill(horizon::palette(st).light),
         theme if around_notch => poni_core::look::around_notch(theme),
         theme => poni_core::look::of(theme),
     }
