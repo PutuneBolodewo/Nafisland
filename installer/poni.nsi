@@ -12,7 +12,7 @@ Target amd64-unicode
 SetCompressor /SOLID lzma
 
 !define APPNAME "Nafisland"
-!define VERSION "0.2.30"
+!define VERSION "0.1.0"
 !define PUBLISHER "Nafisland"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\Poni"
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
@@ -31,7 +31,7 @@ InstallDir "$LOCALAPPDATA\Programs\Poni"
 InstallDirRegKey HKCU "Software\Poni" "InstallDir"
 BrandingText "${APPNAME} ${VERSION}"
 
-VIProductVersion "0.2.30.0"
+VIProductVersion "0.1.0.0"
 VIAddVersionKey "ProductName" "${APPNAME}"
 VIAddVersionKey "CompanyName" "${PUBLISHER}"
 VIAddVersionKey "FileDescription" "${APPNAME} installer"
